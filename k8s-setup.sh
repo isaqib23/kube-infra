@@ -189,8 +189,18 @@ install_calico() {
     curl -O https://raw.githubusercontent.com/projectcalico/calico/${CALICO_VERSION}/manifests/tigera-operator.yaml
     curl -O https://raw.githubusercontent.com/projectcalico/calico/${CALICO_VERSION}/manifests/custom-resources.yaml
     
-    # Apply Calico
+    # Apply Tigera operator first
     kubectl create -f tigera-operator.yaml
+    
+    # Wait for CRDs to be established
+    log "Waiting for Tigera operator CRDs to be ready..."
+    kubectl wait --for condition=established --timeout=120s crd/installations.operator.tigera.io || true
+    kubectl wait --for condition=established --timeout=120s crd/apiservers.operator.tigera.io || true
+    
+    # Wait a bit more for operator to be fully ready
+    sleep 30
+    
+    # Now apply custom resources
     kubectl create -f custom-resources.yaml
     
     log "Calico CNI installed ✓"
