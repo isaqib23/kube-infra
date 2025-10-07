@@ -181,7 +181,6 @@ update_system() {
         lsb-release \
         jq \
         unzip \
-        ntp \
         keepalived \
         haproxy
     
@@ -191,12 +190,22 @@ update_system() {
 configure_time_sync() {
     log "Configuring time synchronization..."
     
-    # Configure NTP for time synchronization
-    systemctl enable ntp
-    systemctl start ntp
+    # Ubuntu 24.04 uses systemd-timesyncd instead of ntp
+    systemctl enable systemd-timesyncd
+    systemctl start systemd-timesyncd
+    
+    # Configure timesyncd
+    cat > /etc/systemd/timesyncd.conf << EOF
+[Time]
+NTP=time.nist.gov pool.ntp.org
+FallbackNTP=ntp.ubuntu.com
+EOF
+    
+    # Restart timesyncd with new config
+    systemctl restart systemd-timesyncd
     
     # Force time sync
-    ntpdate -s time.nist.gov || true
+    timedatectl set-ntp true
     
     success "Time synchronization configured"
 }
