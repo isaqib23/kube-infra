@@ -84,13 +84,24 @@ check_prerequisites() {
         warning "VIP $VIP is not responding. This may be normal during initial setup"
     fi
     
-    # Check if HAProxy and Keepalived are running
-    if ! systemctl is-active --quiet haproxy; then
-        error "HAProxy is not running. Run 02-ha-loadbalancer-setup.sh first"
+    # Check if HAProxy and Keepalived are installed (they may be stopped to avoid port conflicts)
+    if ! command -v haproxy &> /dev/null; then
+        error "HAProxy is not installed. Run 02-ha-loadbalancer-setup.sh first"
     fi
     
-    if ! systemctl is-active --quiet keepalived; then
-        error "Keepalived is not running. Run 02-ha-loadbalancer-setup.sh first"
+    if ! command -v keepalived &> /dev/null; then
+        error "Keepalived is not installed. Run 02-ha-loadbalancer-setup.sh first"
+    fi
+    
+    # Stop HAProxy temporarily if running to avoid port 6443 conflict
+    if systemctl is-active --quiet haproxy; then
+        log "Stopping HAProxy temporarily to avoid port conflicts..."
+        systemctl stop haproxy
+    fi
+    
+    if systemctl is-active --quiet keepalived; then
+        log "Stopping Keepalived temporarily..."
+        systemctl stop keepalived
     fi
     
     success "Prerequisites check passed"
@@ -484,6 +495,25 @@ verify_cluster_health() {
     success "Cluster health verification completed"
 }
 
+restart_ha_services() {
+    log "Restarting HA services after cluster initialization..."
+    
+    # Start Keepalived first to assign VIP
+    systemctl start keepalived
+    sleep 5
+    
+    # Update HAProxy config to avoid conflict with Kubernetes API
+    log "Updating HAProxy configuration for coexistence with Kubernetes API..."
+    
+    # Change HAProxy to bind to VIP instead of local IP for API frontend
+    sed -i 's/bind 10.255.254.10:6443/bind 10.255.254.100:6443/' /etc/haproxy/haproxy.cfg
+    
+    # Start HAProxy
+    systemctl start haproxy
+    
+    success "HA services restarted"
+}
+
 show_completion_info() {
     echo
     echo -e "${GREEN}=============================================================="
@@ -563,6 +593,9 @@ main() {
     
     # Verification
     verify_cluster_health
+    
+    # Restart HA services
+    restart_ha_services
     
     show_completion_info
     
