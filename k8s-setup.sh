@@ -192,16 +192,26 @@ install_calico() {
     # Apply Tigera operator first
     kubectl create -f tigera-operator.yaml
     
-    # Wait for CRDs to be established
-    log "Waiting for Tigera operator CRDs to be ready..."
-    kubectl wait --for condition=established --timeout=120s crd/installations.operator.tigera.io || true
-    kubectl wait --for condition=established --timeout=120s crd/apiservers.operator.tigera.io || true
+    # Wait for Tigera operator pod to be ready
+    log "Waiting for Tigera operator to be ready..."
+    kubectl wait --for=condition=available --timeout=300s deployment/tigera-operator -n tigera-operator
     
-    # Wait a bit more for operator to be fully ready
-    sleep 30
+    # Wait for CRDs to be established with retries
+    log "Waiting for Tigera operator CRDs to be ready..."
+    for i in {1..20}; do
+        if kubectl get crd installations.operator.tigera.io >/dev/null 2>&1; then
+            log "CRDs are ready!"
+            break
+        fi
+        log "Waiting for CRDs... attempt $i/20"
+        sleep 15
+    done
+    
+    # Verify CRDs are established
+    kubectl wait --for condition=established --timeout=60s crd/installations.operator.tigera.io
     
     # Now apply custom resources
-    kubectl create -f custom-resources.yaml
+    kubectl apply -f custom-resources.yaml
     
     log "Calico CNI installed ✓"
 }
@@ -230,22 +240,44 @@ install_metrics_server() {
 
 install_helm() {
     log "Installing Helm..."
-    curl https://baltocdn.com/helm/signing.asc | gpg --dearmor | tee /usr/share/keyrings/helm.gpg > /dev/null
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/helm.gpg] https://baltocdn.com/helm/stable/debian/ all main" | tee /etc/apt/sources.list.d/helm-stable-debian.list
-    apt update
-    apt install -y helm
+    
+    # Try the primary method first
+    if curl -fsSL https://baltocdn.com/helm/signing.asc | gpg --dearmor | tee /usr/share/keyrings/helm.gpg > /dev/null 2>&1; then
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/helm.gpg] https://baltocdn.com/helm/stable/debian/ all main" | tee /etc/apt/sources.list.d/helm-stable-debian.list
+        apt update
+        apt install -y helm
+    else
+        log "Primary Helm installation failed, using alternative method..."
+        # Alternative: Install from GitHub releases
+        curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+        chmod 700 get_helm.sh
+        ./get_helm.sh
+        rm get_helm.sh
+    fi
+    
     log "Helm installed ✓"
 }
 
 install_nginx_ingress() {
     log "Installing NGINX Ingress Controller..."
+    
+    # Ensure cluster is ready first
+    log "Waiting for cluster to be fully ready..."
+    kubectl wait --for=condition=Ready nodes --all --timeout=300s
+    kubectl wait --for=condition=Ready pods -l k8s-app=kube-dns -n kube-system --timeout=300s
+    
     helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
     helm repo update
+    
+    # Install with longer timeout and wait
     helm install ingress-nginx ingress-nginx/ingress-nginx \
         --namespace ingress-nginx \
         --create-namespace \
         --set controller.service.type=NodePort \
-        --set controller.metrics.enabled=true
+        --set controller.metrics.enabled=true \
+        --timeout=10m \
+        --wait
+    
     log "NGINX Ingress Controller installed ✓"
 }
 
