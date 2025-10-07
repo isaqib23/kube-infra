@@ -190,24 +190,16 @@ update_system() {
 configure_time_sync() {
     log "Configuring time synchronization..."
     
-    # Ubuntu 24.04 uses systemd-timesyncd instead of ntp
-    systemctl enable systemd-timesyncd
-    systemctl start systemd-timesyncd
+    # Your system uses ntpsec (already installed and enabled)
+    systemctl enable ntpsec
+    systemctl start ntpsec
     
-    # Configure timesyncd
-    cat > /etc/systemd/timesyncd.conf << EOF
-[Time]
-NTP=time.nist.gov pool.ntp.org
-FallbackNTP=ntp.ubuntu.com
-EOF
-    
-    # Restart timesyncd with new config
-    systemctl restart systemd-timesyncd
-    
-    # Force time sync
-    timedatectl set-ntp true
-    
-    success "Time synchronization configured"
+    # Check if ntpsec is running
+    if systemctl is-active --quiet ntpsec; then
+        success "Time synchronization configured (ntpsec active)"
+    else
+        warning "ntpsec service may not be running properly, but continuing..."
+    fi
 }
 
 disable_swap() {
