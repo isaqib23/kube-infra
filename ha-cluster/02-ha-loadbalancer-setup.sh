@@ -12,7 +12,7 @@ LOG_FILE="/var/log/ha-loadbalancer-setup.log"
 VIP="10.255.254.100"
 VIP_INTERFACE="eno1"  # Dell R740 standard interface
 VRRP_ROUTER_ID="51"
-VRRP_PASSWORD="k8s-ha-2024"
+VRRP_PASSWORD="k8s-ha24"
 
 # Server configuration
 declare -A SERVER_CONFIG=(
@@ -122,9 +122,6 @@ configure_keepalived() {
 global_defs {
     router_id LVS_DEVEL
     vrrp_skip_check_adv_addr
-    vrrp_strict
-    vrrp_garp_interval 0
-    vrrp_gna_interval 0
     script_user root
     enable_script_security
 }
@@ -145,10 +142,11 @@ vrrp_instance VI_1 {
     virtual_router_id $VRRP_ROUTER_ID
     priority $SERVER_PRIORITY
     advert_int 1
-    authentication {
-        auth_type PASS
-        auth_pass $VRRP_PASSWORD
-    }
+    # Remove authentication in strict mode
+    # authentication {
+    #     auth_type PASS
+    #     auth_pass $VRRP_PASSWORD
+    # }
     virtual_ipaddress {
         $VIP/24
     }
@@ -224,7 +222,9 @@ frontend stats
 # Kubernetes API Server Frontend
 #---------------------------------------------------------------------
 frontend kubernetes-api
-    bind $VIP:6443
+    # Only bind to VIP on MASTER node, bind to local IP on BACKUP nodes
+    bind $SERVER_IP:6443
+    bind 127.0.0.1:6443
     mode tcp
     option tcplog
     default_backend kubernetes-api-backend
@@ -258,7 +258,8 @@ EOF
 # HTTP Ingress Frontend (for future use)
 #---------------------------------------------------------------------
 frontend http-ingress
-    bind $VIP:80
+    bind $SERVER_IP:80
+    bind 127.0.0.1:80
     mode http
     redirect scheme https code 301 if !{ ssl_fc }
     default_backend ingress-http-backend
@@ -267,7 +268,8 @@ frontend http-ingress
 # HTTPS Ingress Frontend (for future use)
 #---------------------------------------------------------------------
 frontend https-ingress
-    bind $VIP:443
+    bind $SERVER_IP:443
+    bind 127.0.0.1:443
     mode tcp
     option tcplog
     default_backend ingress-https-backend
