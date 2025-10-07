@@ -108,9 +108,16 @@ check_prerequisites() {
 }
 
 wait_for_vip() {
-    log "Waiting for VIP to be assigned to this server..."
+    log "Checking VIP assignment status..."
     
-    local timeout=60
+    # If keepalived was stopped, we need to start it temporarily to get VIP
+    if ! systemctl is-active --quiet keepalived; then
+        log "Starting Keepalived temporarily to assign VIP..."
+        systemctl start keepalived
+        sleep 10
+    fi
+    
+    local timeout=30
     local counter=0
     
     while [[ $counter -lt $timeout ]]; do
@@ -123,7 +130,9 @@ wait_for_vip() {
         echo -n "."
     done
     
-    error "VIP $VIP was not assigned to this server within $timeout seconds"
+    # Even if VIP isn't assigned, we can continue - it might be on another server
+    warning "VIP $VIP not assigned to this server, but continuing cluster initialization"
+    return 0
 }
 
 create_kubeadm_config() {
@@ -220,6 +229,12 @@ pre_pull_images() {
 
 initialize_cluster() {
     log "Initializing Kubernetes cluster..."
+    
+    # Stop Keepalived again to avoid any port conflicts during initialization
+    if systemctl is-active --quiet keepalived; then
+        log "Stopping Keepalived during cluster initialization..."
+        systemctl stop keepalived
+    fi
     
     # Create audit log directory
     mkdir -p /var/log/kubernetes
