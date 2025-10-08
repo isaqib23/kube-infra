@@ -346,11 +346,14 @@ install_containerd() {
 install_kubernetes() {
     log "Installing Kubernetes components..."
     
-    # Add Kubernetes GPG key
-    curl -fsSL https://pkgs.k8s.io/core:/stable:/v${KUBE_VERSION}/deb/Release.key | gpg --dearmor -o /usr/share/keyrings/kubernetes-apt-keyring.gpg
+    # Remove any existing keyring first
+    rm -f /usr/share/keyrings/kubernetes-apt-keyring.gpg
     
-    # Add Kubernetes repository
-    echo "deb [signed-by=/usr/share/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v${KUBE_VERSION}/deb/ /" | tee /etc/apt/sources.list.d/kubernetes.list
+    # Use the new redirected URL format
+    curl -fsSL https://prod-cdn.packages.k8s.io/repositories/isv:/kubernetes:/core:/stable:/v${KUBE_VERSION}/deb/Release.key | gpg --dearmor -o /usr/share/keyrings/kubernetes-apt-keyring.gpg
+    
+    # Add Kubernetes repository with new URL
+    echo "deb [signed-by=/usr/share/keyrings/kubernetes-apt-keyring.gpg] https://prod-cdn.packages.k8s.io/repositories/isv:/kubernetes:/core:/stable:/v${KUBE_VERSION}/deb/ /" | tee /etc/apt/sources.list.d/kubernetes.list
     
     # Update package lists and install Kubernetes components
     apt update
