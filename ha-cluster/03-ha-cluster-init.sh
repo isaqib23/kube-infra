@@ -230,11 +230,24 @@ initialize_cluster() {
     # Keep Keepalived running - no conflicts expected with port 16443 HAProxy config
     log "Keeping Keepalived running for VIP management during initialization..."
     
+    # Backup DNS configuration before cluster init
+    log "Backing up DNS configuration..."
+    cp /etc/resolv.conf /etc/resolv.conf.pre-k8s
+    
     # Create audit log directory
     mkdir -p /var/log/kubernetes
     
     # Initialize the cluster
     kubeadm init --config /tmp/kubeadm-config.yaml --upload-certs --v=5
+    
+    # Restore DNS configuration immediately after cluster init
+    log "Restoring DNS configuration after cluster initialization..."
+    cat > /etc/resolv.conf << EOF
+nameserver 8.8.8.8
+nameserver 8.8.4.4
+nameserver 10.255.254.1
+search local
+EOF
     
     success "Kubernetes cluster initialized"
 }
@@ -279,6 +292,32 @@ wait_for_api_server() {
 
 install_calico_cni() {
     log "Installing Calico CNI for HA networking..."
+    
+    # Network warm-up - establish routes to external servers
+    log "Warming up network connectivity..."
+    ping -c 3 8.8.8.8 &>/dev/null || true
+    ping -c 3 8.8.4.4 &>/dev/null || true
+    sleep 2
+    
+    # Ensure DNS is working before downloading manifests
+    log "Verifying DNS resolution before Calico download..."
+    if ! nslookup raw.githubusercontent.com &>/dev/null; then
+        warning "DNS resolution not working, fixing DNS configuration..."
+        cat > /etc/resolv.conf << EOF
+nameserver 8.8.8.8
+nameserver 8.8.4.4
+nameserver 10.255.254.1
+search local
+EOF
+        # Network warm-up again after DNS fix
+        ping -c 2 8.8.8.8 &>/dev/null || true
+        sleep 3
+    fi
+    
+    # Test connectivity
+    if ! ping -c 1 8.8.8.8 &>/dev/null; then
+        error "Network connectivity issue - cannot reach external servers"
+    fi
     
     # Download Calico manifests
     curl -O https://raw.githubusercontent.com/projectcalico/calico/${CALICO_VERSION}/manifests/tigera-operator.yaml
