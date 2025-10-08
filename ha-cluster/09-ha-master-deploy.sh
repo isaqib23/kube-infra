@@ -240,27 +240,8 @@ execute_on_node() {
     
     log "Preparing to execute $description on $node ($node_ip)..."
     
-    # Check if SSH is working and script exists
-    if ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no root@$node_ip "test -f $script" &>/dev/null; then
-        log "SSH connection verified and script found on $node"
-        
-        # Ask user if they want to try automatic execution
-        echo
-        echo -e "${BLUE}SSH connection to $node is working.${NC}"
-        read -p "Try automatic execution via SSH? [y/N]: " AUTO_EXEC
-        
-        if [[ $AUTO_EXEC =~ ^[Yy]$ ]]; then
-            log "Attempting automatic execution via SSH..."
-            if ssh -o ConnectTimeout=30 -o StrictHostKeyChecking=no root@$node_ip "cd $(dirname $script) && $script"; then
-                success "$description completed on $node via SSH"
-                return 0
-            else
-                warning "$description failed via SSH, falling back to manual execution"
-            fi
-        fi
-    else
-        log "SSH connection failed or script not found, using manual execution"
-    fi
+    # Skip SSH checking and go directly to manual execution
+    log "Using manual execution mode for $node"
     
     # Manual execution
     wait_for_user_action "$script" "$node" "$description"
