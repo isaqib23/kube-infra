@@ -93,15 +93,12 @@ check_prerequisites() {
         error "Keepalived is not installed. Run 02-ha-loadbalancer-setup.sh first"
     fi
     
-    # Stop HAProxy temporarily if running to avoid port 6443 conflict
-    if systemctl is-active --quiet haproxy; then
-        log "Stopping HAProxy temporarily to avoid port conflicts..."
-        systemctl stop haproxy
-    fi
-    
-    if systemctl is-active --quiet keepalived; then
-        log "Stopping Keepalived temporarily..."
-        systemctl stop keepalived
+    # HAProxy should already be configured for port 16443, no conflicts expected
+    # But ensure Keepalived is running to assign VIP
+    if ! systemctl is-active --quiet keepalived; then
+        log "Starting Keepalived to ensure VIP assignment..."
+        systemctl start keepalived
+        sleep 10
     fi
     
     success "Prerequisites check passed"
@@ -230,11 +227,8 @@ pre_pull_images() {
 initialize_cluster() {
     log "Initializing Kubernetes cluster..."
     
-    # Stop Keepalived again to avoid any port conflicts during initialization
-    if systemctl is-active --quiet keepalived; then
-        log "Stopping Keepalived during cluster initialization..."
-        systemctl stop keepalived
-    fi
+    # Keep Keepalived running - no conflicts expected with port 16443 HAProxy config
+    log "Keeping Keepalived running for VIP management during initialization..."
     
     # Create audit log directory
     mkdir -p /var/log/kubernetes
@@ -511,22 +505,40 @@ verify_cluster_health() {
 }
 
 restart_ha_services() {
-    log "Restarting HA services after cluster initialization..."
+    log "Updating HA services for Kubernetes integration..."
     
-    # Start Keepalived first to assign VIP
-    systemctl start keepalived
-    sleep 5
+    # Ensure Keepalived is running and VIP is assigned
+    if ! systemctl is-active --quiet keepalived; then
+        systemctl start keepalived
+        sleep 10
+    fi
     
-    # Update HAProxy config to avoid conflict with Kubernetes API
-    log "Updating HAProxy configuration for coexistence with Kubernetes API..."
+    # Update HAProxy configuration to use VIP:6443 for API frontend
+    log "Updating HAProxy configuration for Kubernetes API load balancing..."
     
-    # Change HAProxy to bind to VIP instead of local IP for API frontend
-    sed -i 's/bind 10.255.254.10:6443/bind 10.255.254.100:6443/' /etc/haproxy/haproxy.cfg
+    # Stop HAProxy temporarily
+    systemctl stop haproxy 2>/dev/null || true
     
-    # Start HAProxy
-    systemctl start haproxy
+    # Update HAProxy config to use VIP and proper port
+    sed -i 's/bind.*16443/bind '"$VIP"':6443/' /etc/haproxy/haproxy.cfg
+    sed -i 's/bind 127.0.0.1:16443/bind 127.0.0.1:6443/' /etc/haproxy/haproxy.cfg
     
-    success "HA services restarted"
+    # Validate and start HAProxy
+    if haproxy -f /etc/haproxy/haproxy.cfg -c; then
+        systemctl start haproxy
+        success "HAProxy updated and started for Kubernetes integration"
+    else
+        warning "HAProxy configuration validation failed, but continuing..."
+    fi
+    
+    # Test VIP accessibility
+    if curl -k "https://$VIP:6443/healthz" &>/dev/null; then
+        success "Kubernetes API accessible via VIP"
+    else
+        warning "VIP may take time to propagate"
+    fi
+    
+    success "HA services updated for Kubernetes integration"
 }
 
 show_completion_info() {

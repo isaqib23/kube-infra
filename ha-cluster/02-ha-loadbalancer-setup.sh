@@ -220,11 +220,12 @@ frontend stats
 
 #---------------------------------------------------------------------
 # Kubernetes API Server Frontend
+# Note: Initially binds to alternate port, will be updated after cluster init
 #---------------------------------------------------------------------
 frontend kubernetes-api
-    # Only bind to VIP on MASTER node, bind to local IP on BACKUP nodes
-    bind $SERVER_IP:6443
-    bind 127.0.0.1:6443
+    # Bind to alternate port initially to avoid conflicts during cluster init
+    bind $SERVER_IP:16443
+    bind 127.0.0.1:16443
     mode tcp
     option tcplog
     default_backend kubernetes-api-backend
@@ -450,6 +451,28 @@ test_vip_assignment() {
     
     warning "VIP not assigned to this server (this is normal for backup nodes)"
     return 0
+}
+
+update_haproxy_for_kubernetes() {
+    log "Updating HAProxy configuration for Kubernetes coexistence..."
+    
+    # This function is called after Kubernetes cluster is initialized
+    # to update HAProxy to use VIP and proper port configuration
+    
+    # Stop HAProxy temporarily
+    systemctl stop haproxy
+    
+    # Update frontend to bind to VIP:6443
+    sed -i 's/bind.*16443/bind '"$VIP"':6443/' /etc/haproxy/haproxy.cfg
+    sed -i 's/bind 127.0.0.1:16443/bind 127.0.0.1:6443/' /etc/haproxy/haproxy.cfg
+    
+    # Validate configuration
+    if haproxy -f /etc/haproxy/haproxy.cfg -c; then
+        systemctl start haproxy
+        success "HAProxy updated for Kubernetes coexistence"
+    else
+        error "HAProxy configuration validation failed"
+    fi
 }
 
 show_completion_info() {

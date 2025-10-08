@@ -9,15 +9,15 @@ set -euo pipefail
 LOG_FILE="/var/log/ha-cluster-join.log"
 
 # Cluster configuration
-VIP="192.168.1.100"
+VIP="10.255.254.100"
 CLUSTER_NAME="ha-k8s-cluster"
 
 # Control plane servers
 declare -A CONTROL_PLANES=(
-    ["k8s-cp1"]="192.168.1.10"
-    ["k8s-cp2"]="192.168.1.11"
-    ["k8s-cp3"]="192.168.1.12"
-    ["k8s-cp4"]="192.168.1.13"
+    ["k8s-cp1"]="10.255.254.10"
+    ["k8s-cp2"]="10.255.254.11"
+    ["k8s-cp3"]="10.255.254.12"
+    ["k8s-cp4"]="10.255.254.13"
 )
 
 # Colors for output
@@ -82,13 +82,20 @@ check_prerequisites() {
         error "kubeadm is not installed. Run 01-server-preparation.sh first"
     fi
     
-    # Check if HAProxy and Keepalived are running
-    if ! systemctl is-active --quiet haproxy; then
-        error "HAProxy is not running. Run 02-ha-loadbalancer-setup.sh first"
+    # Check if HAProxy and Keepalived are installed and configured
+    if ! systemctl is-enabled --quiet haproxy; then
+        error "HAProxy is not configured. Run 02-ha-loadbalancer-setup.sh first"
     fi
     
+    if ! systemctl is-enabled --quiet keepalived; then
+        error "Keepalived is not configured. Run 02-ha-loadbalancer-setup.sh first"
+    fi
+    
+    # Ensure Keepalived is running for VIP management
     if ! systemctl is-active --quiet keepalived; then
-        error "Keepalived is not running. Run 02-ha-loadbalancer-setup.sh first"
+        log "Starting Keepalived for VIP management..."
+        systemctl start keepalived
+        sleep 5
     fi
     
     # Check if VIP is accessible
@@ -317,6 +324,25 @@ create_storage_directories() {
     success "Storage directories created"
 }
 
+update_haproxy_configuration() {
+    log "Updating HAProxy configuration for Kubernetes integration..."
+    
+    # Update HAProxy config to use VIP:6443 for API frontend
+    systemctl stop haproxy 2>/dev/null || true
+    
+    # Update HAProxy config
+    sed -i 's/bind.*16443/bind '"$VIP"':6443/' /etc/haproxy/haproxy.cfg
+    sed -i 's/bind 127.0.0.1:16443/bind 127.0.0.1:6443/' /etc/haproxy/haproxy.cfg
+    
+    # Validate and start HAProxy
+    if haproxy -f /etc/haproxy/haproxy.cfg -c; then
+        systemctl start haproxy
+        success "HAProxy updated for Kubernetes integration"
+    else
+        warning "HAProxy configuration validation failed"
+    fi
+}
+
 setup_etcd_backup() {
     log "Setting up etcd backup script..."
     
@@ -420,6 +446,7 @@ main() {
     verify_etcd_cluster
     verify_cluster_status
     create_storage_directories
+    update_haproxy_configuration
     setup_etcd_backup
     
     show_completion_info
