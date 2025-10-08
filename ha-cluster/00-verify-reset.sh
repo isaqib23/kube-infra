@@ -75,12 +75,12 @@ check_kubernetes_removal() {
     fi
     
     # Check Kubernetes packages
-    local k8s_packages=$(dpkg -l | grep -E 'kube|kubernetes' | wc -l)
+    local k8s_packages=$(dpkg -l | grep -E 'kube|kubernetes' | wc -l || echo "0")
     if [[ $k8s_packages -eq 0 ]]; then
         pass "No Kubernetes packages found"
     else
         fail "Kubernetes packages still installed: $k8s_packages"
-        dpkg -l | grep -E 'kube|kubernetes'
+        dpkg -l | grep -E 'kube|kubernetes' || true
     fi
     
     # Check Kubernetes directories
@@ -137,12 +137,12 @@ check_container_runtime_removal() {
     fi
     
     # Check container packages
-    local container_packages=$(dpkg -l | grep -E 'containerd|docker' | grep -v 'docker-compose' | wc -l)
+    local container_packages=$(dpkg -l | grep -E 'containerd|docker' | grep -v 'docker-compose' | wc -l || echo "0")
     if [[ $container_packages -eq 0 ]]; then
         pass "No container runtime packages found"
     else
         fail "Container runtime packages still installed: $container_packages"
-        dpkg -l | grep -E 'containerd|docker'
+        dpkg -l | grep -E 'containerd|docker' || true
     fi
     
     # Check container directories
@@ -179,12 +179,12 @@ check_ha_components_removal() {
     fi
     
     # Check HA packages
-    local ha_packages=$(dpkg -l | grep -E 'haproxy|keepalived' | wc -l)
+    local ha_packages=$(dpkg -l | grep -E 'haproxy|keepalived' | wc -l || echo "0")
     if [[ $ha_packages -eq 0 ]]; then
         pass "No HA packages found"
     else
         fail "HA packages still installed: $ha_packages"
-        dpkg -l | grep -E 'haproxy|keepalived'
+        dpkg -l | grep -E 'haproxy|keepalived' || true
     fi
     
     # Check HA directories
@@ -259,7 +259,7 @@ check_network_configuration() {
         pass "No Kubernetes network interfaces found"
     else
         fail "Kubernetes network interfaces still exist: $k8s_interfaces"
-        ip link show | grep -E 'cali|flannel|weave|cni|docker|br-'
+        ip link show | grep -E 'cali|flannel|weave|cni|docker|br-' || true
     fi
     
     # Check CNI directories
@@ -307,7 +307,7 @@ check_system_configuration() {
     fi
     
     # Check /etc/hosts
-    if ! grep -q "k8s-cp" /etc/hosts; then
+    if ! grep -q "k8s-cp" /etc/hosts 2>/dev/null; then
         pass "/etc/hosts reset to basic configuration"
     else
         warn "/etc/hosts still contains k8s entries (may need manual cleanup)"
@@ -363,7 +363,7 @@ check_package_system() {
         pass "No orphaned configuration packages"
     else
         warn "$orphaned_packages orphaned configuration packages found"
-        dpkg -l | grep '^rc' | head -5
+        dpkg -l | grep '^rc' | head -5 || true
     fi
     
     # Check for broken packages
