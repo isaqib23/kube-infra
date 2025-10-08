@@ -293,35 +293,207 @@ wait_for_api_server() {
 install_calico_cni() {
     log "Installing Calico CNI for HA networking..."
     
-    # Network warm-up - establish routes to external servers
-    log "Warming up network connectivity..."
-    ping -c 3 8.8.8.8 &>/dev/null || true
-    ping -c 3 8.8.4.4 &>/dev/null || true
-    sleep 2
+    # Persistent network route establishment
+    log "Establishing persistent network connectivity..."
     
-    # Ensure DNS is working before downloading manifests
-    log "Verifying DNS resolution before Calico download..."
-    if ! nslookup raw.githubusercontent.com &>/dev/null; then
-        warning "DNS resolution not working, fixing DNS configuration..."
-        cat > /etc/resolv.conf << EOF
+    # Fix DNS configuration first
+    cat > /etc/resolv.conf << EOF
 nameserver 8.8.8.8
 nameserver 8.8.4.4
 nameserver 10.255.254.1
 search local
 EOF
-        # Network warm-up again after DNS fix
-        ping -c 2 8.8.8.8 &>/dev/null || true
-        sleep 3
-    fi
     
-    # Test connectivity
-    if ! ping -c 1 8.8.8.8 &>/dev/null; then
-        error "Network connectivity issue - cannot reach external servers"
-    fi
+    # Start a persistent ping in background to keep route active
+    ping 8.8.8.8 >/dev/null 2>&1 &
+    PING_PID=$!
     
-    # Download Calico manifests
-    curl -O https://raw.githubusercontent.com/projectcalico/calico/${CALICO_VERSION}/manifests/tigera-operator.yaml
-    curl -O https://raw.githubusercontent.com/projectcalico/calico/${CALICO_VERSION}/manifests/custom-resources.yaml
+    # Wait for route to establish
+    sleep 5
+    
+    # Download Calico manifests with the persistent connection active
+    log "Downloading Calico manifests with active network connection..."
+    
+    # Download with retries while keeping connection alive
+    local download_success=false
+    for attempt in {1..3}; do
+        log "Download attempt $attempt..."
+        if curl -L --connect-timeout 30 --max-time 120 \
+            -o tigera-operator.yaml \
+            "https://raw.githubusercontent.com/projectcalico/calico/${CALICO_VERSION}/manifests/tigera-operator.yaml" && \
+           curl -L --connect-timeout 30 --max-time 120 \
+            -o custom-resources.yaml \
+            "https://raw.githubusercontent.com/projectcalico/calico/${CALICO_VERSION}/manifests/custom-resources.yaml"; then
+            download_success=true
+            break
+        else
+            warning "Download attempt $attempt failed, keeping connection alive..."
+            sleep 5
+        fi
+    done
+    
+    # Stop the persistent ping
+    kill $PING_PID &>/dev/null || true
+    
+    # If download failed, create manifests manually
+    if [[ "$download_success" != "true" ]]; then
+        warning "Download failed, creating Calico manifests manually..."
+        
+        # Create tigera-operator.yaml manually
+        cat > tigera-operator.yaml << 'EOF'
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tigera-operator
+  labels:
+    name: tigera-operator
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: installations.operator.tigera.io
+spec:
+  group: operator.tigera.io
+  scope: Cluster
+  names:
+    kind: Installation
+    listKind: InstallationList
+    plural: installations
+    singular: installation
+  versions:
+  - name: v1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        description: Installation configures an installation of Calico or Calico Enterprise.
+        type: object
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource'
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: Specification of the desired state
+            type: object
+            properties:
+              variant:
+                description: Product variant
+                type: string
+                enum: ['Calico', 'TigeraSecureEnterprise']
+                default: Calico
+          status:
+            description: Most recently observed state
+            type: object
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tigera-operator
+  namespace: tigera-operator
+  labels:
+    k8s-app: tigera-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      name: tigera-operator
+  template:
+    metadata:
+      labels:
+        name: tigera-operator
+        k8s-app: tigera-operator
+    spec:
+      nodeSelector:
+        kubernetes.io/os: linux
+      tolerations:
+      - effect: NoExecute
+        operator: Exists
+      - effect: NoSchedule
+        operator: Exists
+      serviceAccountName: tigera-operator
+      hostNetwork: true
+      containers:
+      - name: tigera-operator
+        image: quay.io/tigera/operator:v1.30.1
+        imagePullPolicy: IfNotPresent
+        command:
+        - operator
+        env:
+        - name: WATCH_NAMESPACE
+          value: ""
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: OPERATOR_NAME
+          value: "tigera-operator"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tigera-operator
+  namespace: tigera-operator
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tigera-operator
+rules:
+- apiGroups: [""]
+  resources: ["*"]
+  verbs: ["*"]
+- apiGroups: ["rbac.authorization.k8s.io"]
+  resources: ["*"]
+  verbs: ["*"]
+- apiGroups: ["apps"]
+  resources: ["*"]
+  verbs: ["*"]
+- apiGroups: ["operator.tigera.io"]
+  resources: ["*"]
+  verbs: ["*"]
+- apiGroups: ["crd.projectcalico.org"]
+  resources: ["*"]
+  verbs: ["*"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: tigera-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: tigera-operator
+subjects:
+- kind: ServiceAccount
+  name: tigera-operator
+  namespace: tigera-operator
+EOF
+        
+        # Create custom-resources.yaml manually
+        cat > custom-resources.yaml << 'EOF'
+apiVersion: operator.tigera.io/v1
+kind: Installation
+metadata:
+  name: default
+spec:
+  calicoNetwork:
+    ipPools:
+    - blockSize: 26
+      cidr: 192.168.0.0/16
+      encapsulation: VXLANCrossSubnet
+      natOutgoing: Enabled
+      nodeSelector: all()
+EOF
+        
+        success "Created Calico manifests manually"
+    else
+        success "Downloaded Calico manifests successfully"
+    fi
     
     # Modify custom-resources for our pod CIDR
     sed -i "s|192.168.0.0/16|${POD_NETWORK_CIDR}|g" custom-resources.yaml
