@@ -72,12 +72,24 @@ banner() {
     echo "#                                                              #"
     echo "#     HA Kubernetes Cluster Master Deployment Script          #"
     echo "#     4x Dell PowerEdge R740 Servers                          #"
+    echo "#     MANUAL EXECUTION MODE                                    #"
     echo "#                                                              #"
     echo "################################################################"
     echo -e "${NC}"
     echo
-    echo "This script orchestrates the complete deployment of a High"
-    echo "Availability Kubernetes cluster across your 4 Dell R740 servers."
+    echo -e "${YELLOW}${BOLD}DEPLOYMENT MODE: Manual with Guided Steps${NC}"
+    echo
+    echo "This script will guide you through each deployment step."
+    echo "For each server, you'll receive clear instructions on:"
+    echo "• Which script to run"
+    echo "• Which server to run it on" 
+    echo "• When to proceed to the next step"
+    echo
+    echo -e "${GREEN}Benefits of manual mode:${NC}"
+    echo "• Full control over each step"
+    echo "• Easy to troubleshoot if issues arise"
+    echo "• No SSH connectivity requirements"
+    echo "• Can monitor progress on each server"
     echo
     echo "Deployment Overview:"
     echo "• Phase 1: Prerequisites and planning"
@@ -186,15 +198,37 @@ get_deployment_configuration() {
 }
 
 wait_for_user_action() {
-    local action="$1"
-    local nodes="$2"
+    local script="$1"
+    local node="$2"
+    local description="$3"
+    
+    local node_ip="${CONTROL_PLANES[$node]}"
     
     echo
-    echo -e "${YELLOW}${BOLD}ACTION REQUIRED:${NC}"
-    echo "$action"
-    echo "Nodes: $nodes"
+    echo -e "${YELLOW}${BOLD}=============================================================="
+    echo "  MANUAL EXECUTION REQUIRED"
+    echo -e "==============================================================${NC}"
     echo
-    read -p "Press Enter when ready to continue..."
+    echo -e "${BLUE}${BOLD}Step: $description${NC}"
+    echo -e "${BLUE}Server: $node ($node_ip)${NC}"
+    echo -e "${BLUE}Script: $script${NC}"
+    echo
+    echo -e "${YELLOW}${BOLD}Instructions:${NC}"
+    echo "1. Open a new terminal/SSH session"
+    echo "2. Connect to the server: ${GREEN}ssh root@$node_ip${NC}"
+    echo "3. Run the script: ${GREEN}${BOLD}sudo $script${NC}"
+    echo "4. Wait for the script to complete successfully"
+    echo "5. Verify no error messages appear"
+    echo "6. Return here and press ENTER to continue"
+    echo
+    echo -e "${RED}${BOLD}⚠️  IMPORTANT: Do NOT continue until the script completes successfully!${NC}"
+    echo -e "${RED}   Check the script output for any errors before proceeding.${NC}"
+    echo
+    
+    read -p "Press ENTER when $description is completed successfully on $node..."
+    
+    success "$description completed on $node (manual confirmation)"
+    echo
 }
 
 execute_on_node() {
@@ -204,21 +238,32 @@ execute_on_node() {
     
     local node_ip="${CONTROL_PLANES[$node]}"
     
-    log "Executing $description on $node ($node_ip)..."
+    log "Preparing to execute $description on $node ($node_ip)..."
     
-    # Try SSH execution first
-    if ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no root@$node_ip "test -f $SCRIPT_DIR/$script" &>/dev/null; then
-        if ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no root@$node_ip "$SCRIPT_DIR/$script" &>/dev/null; then
-            success "$description completed on $node"
-            return 0
-        else
-            warning "$description failed on $node via SSH"
+    # Check if SSH is working and script exists
+    if ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no root@$node_ip "test -f $script" &>/dev/null; then
+        log "SSH connection verified and script found on $node"
+        
+        # Ask user if they want to try automatic execution
+        echo
+        echo -e "${BLUE}SSH connection to $node is working.${NC}"
+        read -p "Try automatic execution via SSH? [y/N]: " AUTO_EXEC
+        
+        if [[ $AUTO_EXEC =~ ^[Yy]$ ]]; then
+            log "Attempting automatic execution via SSH..."
+            if ssh -o ConnectTimeout=30 -o StrictHostKeyChecking=no root@$node_ip "cd $(dirname $script) && $script"; then
+                success "$description completed on $node via SSH"
+                return 0
+            else
+                warning "$description failed via SSH, falling back to manual execution"
+            fi
         fi
+    else
+        log "SSH connection failed or script not found, using manual execution"
     fi
     
-    # Fall back to manual instruction
-    warning "Cannot execute remotely on $node. Manual execution required."
-    wait_for_user_action "Run the following command on $node: $SCRIPT_DIR/$script" "$node"
+    # Manual execution
+    wait_for_user_action "$script" "$node" "$description"
     
     return 0
 }
@@ -244,7 +289,7 @@ phase_server_preparation() {
     
     # Execute on other nodes
     for node in k8s-cp2 k8s-cp3 k8s-cp4; do
-        execute_on_node "$node" "01-server-preparation.sh" "Server preparation"
+        execute_on_node "$node" "$SCRIPT_DIR/01-server-preparation.sh" "Server preparation"
     done
     
     log "Verifying all nodes are prepared..."
@@ -274,7 +319,7 @@ phase_loadbalancer_setup() {
                 error "Load balancer setup failed on k8s-cp1"
             fi
         else
-            execute_on_node "$node" "02-ha-loadbalancer-setup.sh" "Load balancer setup"
+            execute_on_node "$node" "$SCRIPT_DIR/02-ha-loadbalancer-setup.sh" "Load balancer setup"
         fi
     done
     
@@ -347,7 +392,7 @@ phase_control_plane_joining() {
     # Execute join on other nodes
     for node in k8s-cp2 k8s-cp3 k8s-cp4; do
         log "Joining $node to the cluster..."
-        execute_on_node "$node" "04-ha-cluster-join.sh" "Control plane join"
+        execute_on_node "$node" "$SCRIPT_DIR/04-ha-cluster-join.sh" "Control plane join"
         
         # Wait for node to appear in cluster
         local join_timeout=180
