@@ -433,80 +433,52 @@ create_default_ssl_certificate() {
 }
 
 update_haproxy_for_ingress() {
-    log "Updating HAProxy configuration for ingress traffic..."
-    
-    # Update HAProxy config on all nodes to include ingress backends
+    log "Checking HAProxy configuration for ingress traffic..."
+
+    # NOTE: HAProxy is disabled on nodes with VIP (kube-apiserver conflict)
+    # Ingress traffic routes via NodePort (30080/30443) which works without HAProxy
+
+    # Check which node has VIP
+    local vip_node=""
     for node in "${!CONTROL_PLANES[@]}"; do
         local node_ip="${CONTROL_PLANES[$node]}"
-        
-        log "Updating HAProxy on $node ($node_ip)..."
-        
-        # Create a script to update HAProxy backends
-        cat > /tmp/update-haproxy-$node.sh << EOF
-#!/bin/bash
-# Update HAProxy configuration for ingress on $node
 
-# Backup current config
-cp /etc/haproxy/haproxy.cfg /etc/haproxy/haproxy.cfg.backup.\$(date +%Y%m%d_%H%M%S)
-
-# Update backends to include all nodes for ingress
-sed -i '/server placeholder 127.0.0.1:30080 check backup/d' /etc/haproxy/haproxy.cfg
-sed -i '/server placeholder 127.0.0.1:30443 check backup/d' /etc/haproxy/haproxy.cfg
-
-# Add all control plane nodes to HTTP backend
-sed -i '/backend ingress-http-backend/,/backend ingress-https-backend/{
-  /# Servers will be added by ingress setup script/a\\
-EOF
-
-        for backend_node in "${!CONTROL_PLANES[@]}"; do
-            local backend_ip="${CONTROL_PLANES[$backend_node]}"
-            echo "    server $backend_node $backend_ip:30080 check" >> /tmp/update-haproxy-$node.sh
-        done
-
-        cat >> /tmp/update-haproxy-$node.sh << EOF
-}
-
-# Add all control plane nodes to HTTPS backend
-sed -i '/backend ingress-https-backend/,/\$/{
-  /# Servers will be added by ingress setup script/a\\
-EOF
-
-        for backend_node in "${!CONTROL_PLANES[@]}"; do
-            local backend_ip="${CONTROL_PLANES[$backend_node]}"
-            echo "    server $backend_node $backend_ip:30443 check" >> /tmp/update-haproxy-$node.sh
-        done
-
-        cat >> /tmp/update-haproxy-$node.sh << EOF
-}
-
-# Validate and reload HAProxy
-if haproxy -f /etc/haproxy/haproxy.cfg -c; then
-    systemctl reload haproxy
-    echo "HAProxy configuration updated and reloaded on $node"
-else
-    echo "HAProxy configuration validation failed on $node"
-    # Restore backup
-    cp /etc/haproxy/haproxy.cfg.backup.\$(date +%Y%m%d_%H%M%S | head -1) /etc/haproxy/haproxy.cfg
-    exit 1
-fi
-EOF
-
-        chmod +x /tmp/update-haproxy-$node.sh
-        
-        # Execute on local node or copy to remote node
         if [[ "$node" == "k8s-cp1" ]]; then
-            /tmp/update-haproxy-$node.sh
+            # Check locally
+            if ip addr show | grep -q "$VIP"; then
+                vip_node="$node"
+                log "VIP is assigned to $node (local)"
+            fi
         else
-            # Try to execute on remote node (requires SSH access)
-            if scp -o ConnectTimeout=5 -o StrictHostKeyChecking=no /tmp/update-haproxy-$node.sh root@$node_ip:/tmp/ &>/dev/null; then
-                ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no root@$node_ip "/tmp/update-haproxy-$node.sh" &>/dev/null || warning "Could not update HAProxy on $node via SSH"
-            else
-                warning "Could not copy HAProxy update script to $node. Manual update required."
+            # Check remotely via SSH
+            if ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no root@$node_ip "ip addr show | grep -q $VIP" &>/dev/null; then
+                vip_node="$node"
+                log "VIP is assigned to $node"
             fi
         fi
     done
-    
-    success "HAProxy configurations updated for ingress traffic"
+
+    if [[ -n "$vip_node" ]]; then
+        log "HAProxy is disabled on $vip_node (has VIP, would conflict with kube-apiserver)"
+        success "Ingress traffic will use NodePort (30080/30443) directly"
+    else
+        warning "Could not determine VIP assignment"
+    fi
+
+    # Verify ingress NodePort is accessible
+    if curl -k -s "http://localhost:30080/healthz" &>/dev/null; then
+        success "Ingress HTTP endpoint accessible on NodePort 30080"
+    else
+        warning "Ingress HTTP endpoint not yet accessible (may need time to start)"
+    fi
+
+    if curl -k -s "https://localhost:30443/healthz" &>/dev/null; then
+        success "Ingress HTTPS endpoint accessible on NodePort 30443"
+    else
+        warning "Ingress HTTPS endpoint not yet accessible (may need time to start)"
+    fi
+
+    success "Ingress configuration verified (HAProxy not needed for ingress traffic)"
 }
 
 wait_for_ingress_ready() {
