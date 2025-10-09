@@ -61,27 +61,40 @@ check_root() {
     fi
 }
 
+check_swap() {
+    log "Checking if swap is enabled..."
+
+    if swapon --show | grep -q "/"; then
+        error "Swap is enabled. Kubernetes requires swap to be disabled.\n\nDisable swap with:\n  sudo swapoff -a\n  sudo sed -i '/ swap / s/^\\(.*\\)$/#\\1/g' /etc/fstab"
+    fi
+
+    success "Swap is disabled"
+}
+
 check_prerequisites() {
     log "Checking prerequisites..."
-    
+
     # Get current hostname
     local hostname=$(hostname)
-    
+
     # Verify this is NOT k8s-cp1
     if [[ "$hostname" == "k8s-cp1" ]]; then
         error "This script should NOT be run on k8s-cp1. Use 03-ha-cluster-init.sh instead"
     fi
-    
+
     # Verify this is one of the expected control planes
     if [[ ! ${CONTROL_PLANES[$hostname]+_} ]]; then
         error "Unknown hostname: $hostname. Expected one of: k8s-cp2, k8s-cp3, k8s-cp4"
     fi
-    
+
+    # CRITICAL: Check swap before anything else
+    check_swap
+
     # Check if kubeadm is installed
     if ! command -v kubeadm &> /dev/null; then
         error "kubeadm is not installed. Run 01-server-preparation.sh first"
     fi
-    
+
     # Check if HAProxy and Keepalived are installed
     if ! command -v haproxy &> /dev/null; then
         error "HAProxy is not installed. Run 02-ha-loadbalancer-setup.sh first"
@@ -93,7 +106,7 @@ check_prerequisites() {
 
     # Note: HAProxy may be disabled on some nodes to avoid VIP:6443 conflicts
     # This is normal and expected
-    
+
     # Ensure Keepalived is running for VIP management
     if ! systemctl is-active --quiet keepalived; then
         log "Starting Keepalived for VIP management..."
@@ -256,7 +269,8 @@ controlPlane:
 nodeRegistration:
   criSocket: unix:///var/run/containerd/containerd.sock
   kubeletExtraArgs:
-    node-ip: "$server_ip"
+    - name: "node-ip"
+      value: "$server_ip"
   taints: []
 ---
 apiVersion: kubeadm.k8s.io/v1beta4
@@ -350,16 +364,27 @@ wait_for_node_ready() {
     error "Node $hostname did not become Ready within $timeout seconds"
 }
 
+label_control_plane_node() {
+    log "Labeling node as control-plane..."
+
+    local hostname=$(hostname)
+
+    # Add control-plane role label
+    kubectl label node "$hostname" node-role.kubernetes.io/control-plane= --overwrite || warning "Could not label node (may need time)"
+
+    success "Node labeled as control-plane"
+}
+
 remove_control_plane_taints() {
     log "Removing control plane taints to allow workload scheduling..."
-    
+
     local hostname=$(hostname)
-    
+
     # Remove taints from this control plane node
-    kubectl taint node "$hostname" node-role.kubernetes.io/control-plane:NoSchedule- || true
-    kubectl taint node "$hostname" node-role.kubernetes.io/master:NoSchedule- || true
-    
-    success "Control plane taints removed from $hostname"
+    kubectl taint node "$hostname" node-role.kubernetes.io/control-plane:NoSchedule- 2>/dev/null || log "Taint not found or already removed"
+    kubectl taint node "$hostname" node-role.kubernetes.io/master:NoSchedule- 2>/dev/null || log "Taint not found or already removed"
+
+    success "Control plane taints handled"
 }
 
 verify_etcd_cluster() {
@@ -576,6 +601,7 @@ main() {
     join_cluster
     configure_kubectl
     wait_for_node_ready
+    label_control_plane_node
     remove_control_plane_taints
 
     # Verification and setup

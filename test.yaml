@@ -1,0 +1,29 @@
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: JoinConfiguration
+discovery:
+  bootstrapToken:
+    token: "y0l3c8.7poc9bo5ivpr6ocq"
+    apiServerEndpoint: "10.255.254.100:6443"
+    caCertHashes:
+      - "sha256:10faa87b4b99931a27b48623b597cd9039206abb99b51e16e24c439d1cd193bb"
+controlPlane:
+  localAPIEndpoint:
+    advertiseAddress: 10.255.254.11
+    bindPort: 6443
+  certificateKey: "d82abe450c35353bbfd798d30c9f26ce11caa3ab1fcde80a3d023782d41df0ed"
+nodeRegistration:
+  criSocket: unix:///var/run/containerd/containerd.sock
+  kubeletExtraArgs:
+    - name: "node-ip"
+      value: "10.255.254.11"
+  taints: []
+---
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: ClusterConfiguration
+etcd:
+  local:
+    extraArgs:
+      election-timeout: "20000"
+      heartbeat-interval: "2000"
+apiServer:
+  timeoutForControlPlane: 15m0s
