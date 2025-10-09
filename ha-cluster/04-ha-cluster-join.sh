@@ -110,6 +110,40 @@ check_prerequisites() {
     success "Prerequisites check passed for $hostname (VIP is accessible)"
 }
 
+check_certificate_expiration() {
+    log "Checking if certificates might be expired..."
+
+    # Try to verify the certificate key by checking kubeadm-certs secret on k8s-cp1
+    if timeout 10 kubectl --server="https://$VIP:6443" --insecure-skip-tls-verify get secret kubeadm-certs -n kube-system &>/dev/null; then
+        success "Certificate secret exists and is valid"
+        return 0
+    else
+        warning "Certificate secret 'kubeadm-certs' not found or expired"
+        echo
+        echo -e "${RED}═══════════════════════════════════════════════════════════${NC}"
+        echo -e "${RED}  CERTIFICATE KEY EXPIRED${NC}"
+        echo -e "${RED}═══════════════════════════════════════════════════════════${NC}"
+        echo
+        echo "The kubeadm-certs Secret has expired (TTL: 2 hours)"
+        echo
+        echo "To generate fresh certificates, run these commands on k8s-cp1:"
+        echo
+        echo -e "${GREEN}  sudo kubeadm init phase upload-certs --upload-certs${NC}"
+        echo
+        echo "This will output a new certificate key. Then update:"
+        echo "  /tmp/control-plane-join.sh"
+        echo
+        echo "Also check if token is valid:"
+        echo -e "${GREEN}  sudo kubeadm token list${NC}"
+        echo
+        echo "If token expired, create new one:"
+        echo -e "${GREEN}  sudo kubeadm token create --ttl 24h${NC}"
+        echo
+        read -p "Press ENTER after generating fresh certificates on k8s-cp1, or Ctrl+C to exit..."
+        echo
+    fi
+}
+
 get_join_information() {
     log "Getting join information..."
 
@@ -202,18 +236,57 @@ join_cluster() {
     log "Backing up DNS configuration..."
     cp /etc/resolv.conf /etc/resolv.conf.pre-join 2>/dev/null || true
 
-    # Create join command
-    local join_command="kubeadm join $VIP:6443 \
-        --token $JOIN_TOKEN \
-        --discovery-token-ca-cert-hash $CA_CERT_HASH \
-        --control-plane \
-        --certificate-key $CERT_KEY \
-        --apiserver-advertise-address $server_ip \
-        --cri-socket unix:///var/run/containerd/containerd.sock \
-        --v=5"
+    # Create kubeadm join configuration with increased etcd timeouts
+    log "Creating kubeadm join configuration with etcd learner promotion fixes..."
 
-    log "Executing join command..."
-    eval $join_command
+    cat > /tmp/kubeadm-join-config.yaml << EOF
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: JoinConfiguration
+discovery:
+  bootstrapToken:
+    token: $JOIN_TOKEN
+    apiServerEndpoint: "$VIP:6443"
+    caCertHashes:
+      - "$CA_CERT_HASH"
+controlPlane:
+  localAPIEndpoint:
+    advertiseAddress: $server_ip
+    bindPort: 6443
+  certificateKey: "$CERT_KEY"
+nodeRegistration:
+  criSocket: unix:///var/run/containerd/containerd.sock
+  kubeletExtraArgs:
+    node-ip: "$server_ip"
+  taints: []
+---
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: ClusterConfiguration
+etcd:
+  local:
+    extraArgs:
+      # Increase timeouts to help with etcd learner promotion
+      election-timeout: "10000"
+      heartbeat-interval: "1000"
+      # Enable verbose logging for etcd debugging
+      log-level: "info"
+apiServer:
+  extraArgs:
+    # Increase API server timeouts
+    default-watch-cache-size: "100"
+    watch-cache-sizes: "persistentvolumeclaims#100,persistentvolumes#100"
+  timeoutForControlPlane: 10m0s
+EOF
+
+    log "Executing join with etcd-optimized configuration..."
+    log "This may take 5-10 minutes due to etcd learner sync and promotion..."
+
+    # Run join with verbose logging and config file
+    if kubeadm join --config /tmp/kubeadm-join-config.yaml --v=5; then
+        success "Join command completed successfully"
+    else
+        local join_exit_code=$?
+        error "Join command failed with exit code $join_exit_code"
+    fi
 
     # Restore DNS configuration immediately after join
     log "Restoring DNS configuration..."
@@ -489,30 +562,31 @@ main() {
     banner
     check_root
     check_prerequisites
-    
+
     local hostname=$(hostname)
     log "Starting cluster join process for $hostname..."
-    
+
     # Join preparation
+    check_certificate_expiration
     get_join_information
     test_cluster_connectivity
     pre_pull_images
-    
+
     # Join cluster
     join_cluster
     configure_kubectl
     wait_for_node_ready
     remove_control_plane_taints
-    
+
     # Verification and setup
     verify_etcd_cluster
     verify_cluster_status
     create_storage_directories
     update_haproxy_configuration
     setup_etcd_backup
-    
+
     show_completion_info
-    
+
     success "Control plane join completed successfully on $hostname!"
 }
 
