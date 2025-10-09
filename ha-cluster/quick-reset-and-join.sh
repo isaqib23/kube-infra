@@ -71,8 +71,8 @@ reset_kubernetes() {
     rm -rf /etc/cni/net.d/
     rm -rf /var/lib/cni/
 
-    # Remove any leftover iptables rules
-    iptables -F && iptables -t nat -F && iptables -t mangle -F && iptables -X || true
+    # Note: We do NOT flush iptables as it breaks networking
+    # kubeadm reset already handles Kubernetes-specific iptables rules
 
     success "Kubernetes reset complete"
 }

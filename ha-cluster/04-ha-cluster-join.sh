@@ -194,10 +194,14 @@ pre_pull_images() {
 
 join_cluster() {
     log "Joining cluster as control plane..."
-    
+
     local hostname=$(hostname)
     local server_ip=${CONTROL_PLANES[$hostname]}
-    
+
+    # Backup DNS configuration before join
+    log "Backing up DNS configuration..."
+    cp /etc/resolv.conf /etc/resolv.conf.pre-join 2>/dev/null || true
+
     # Create join command
     local join_command="kubeadm join $VIP:6443 \
         --token $JOIN_TOKEN \
@@ -207,10 +211,19 @@ join_cluster() {
         --apiserver-advertise-address $server_ip \
         --cri-socket unix:///var/run/containerd/containerd.sock \
         --v=5"
-    
+
     log "Executing join command..."
     eval $join_command
-    
+
+    # Restore DNS configuration immediately after join
+    log "Restoring DNS configuration..."
+    cat > /etc/resolv.conf << EOF
+nameserver 8.8.8.8
+nameserver 8.8.4.4
+nameserver 10.255.254.1
+search local
+EOF
+
     success "Successfully joined cluster as control plane"
 }
 
