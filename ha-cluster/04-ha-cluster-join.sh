@@ -82,14 +82,17 @@ check_prerequisites() {
         error "kubeadm is not installed. Run 01-server-preparation.sh first"
     fi
     
-    # Check if HAProxy and Keepalived are installed and configured
-    if ! systemctl is-enabled --quiet haproxy; then
-        error "HAProxy is not configured. Run 02-ha-loadbalancer-setup.sh first"
+    # Check if HAProxy and Keepalived are installed
+    if ! command -v haproxy &> /dev/null; then
+        error "HAProxy is not installed. Run 02-ha-loadbalancer-setup.sh first"
     fi
-    
-    if ! systemctl is-enabled --quiet keepalived; then
-        error "Keepalived is not configured. Run 02-ha-loadbalancer-setup.sh first"
+
+    if ! command -v keepalived &> /dev/null; then
+        error "Keepalived is not installed. Run 02-ha-loadbalancer-setup.sh first"
     fi
+
+    # Note: HAProxy may be disabled on some nodes to avoid VIP:6443 conflicts
+    # This is normal and expected
     
     # Ensure Keepalived is running for VIP management
     if ! systemctl is-active --quiet keepalived; then
@@ -192,12 +195,12 @@ join_cluster() {
 
 configure_kubectl() {
     log "Configuring kubectl..."
-    
+
     # Configure kubectl for root
     mkdir -p /root/.kube
     cp -i /etc/kubernetes/admin.conf /root/.kube/config
     chown root:root /root/.kube/config
-    
+
     # Configure kubectl for ubuntu user if exists
     if id "ubuntu" &>/dev/null; then
         log "Configuring kubectl for ubuntu user..."
@@ -205,7 +208,15 @@ configure_kubectl() {
         cp -i /etc/kubernetes/admin.conf /home/ubuntu/.kube/config
         chown ubuntu:ubuntu /home/ubuntu/.kube/config
     fi
-    
+
+    # Configure kubectl for rao user if exists
+    if id "rao" &>/dev/null; then
+        log "Configuring kubectl for rao user..."
+        mkdir -p /home/rao/.kube
+        cp -i /etc/kubernetes/admin.conf /home/rao/.kube/config
+        chown rao:rao /home/rao/.kube/config
+    fi
+
     success "kubectl configured"
 }
 
@@ -325,21 +336,38 @@ create_storage_directories() {
 }
 
 update_haproxy_configuration() {
-    log "Updating HAProxy configuration for Kubernetes integration..."
-    
-    # Update HAProxy config to use VIP:6443 for API frontend
-    systemctl stop haproxy 2>/dev/null || true
-    
-    # Update HAProxy config
-    sed -i 's/bind.*16443/bind '"$VIP"':6443/' /etc/haproxy/haproxy.cfg
-    sed -i 's/bind 127.0.0.1:16443/bind 127.0.0.1:6443/' /etc/haproxy/haproxy.cfg
-    
-    # Validate and start HAProxy
-    if haproxy -f /etc/haproxy/haproxy.cfg -c; then
-        systemctl start haproxy
-        success "HAProxy updated for Kubernetes integration"
+    log "Checking HAProxy configuration for Kubernetes integration..."
+
+    # Check if kube-apiserver is listening on port 6443
+    if netstat -tlnp 2>/dev/null | grep -q ":6443.*kube-apiserver" || \
+       ss -tlnp 2>/dev/null | grep -q ":6443.*kube-apiserver"; then
+
+        warning "kube-apiserver is listening on *:6443"
+
+        # Check if this node has the VIP
+        if ip addr show | grep -q "$VIP"; then
+            warning "This node has VIP - HAProxy would conflict with kube-apiserver"
+            log "Disabling HAProxy to avoid port conflict..."
+            systemctl stop haproxy 2>/dev/null || true
+            systemctl disable haproxy 2>/dev/null || true
+            success "HAProxy disabled (node has VIP, kube-apiserver handles it)"
+        else
+            log "This node does NOT have VIP - HAProxy can run optionally"
+            log "Keeping HAProxy disabled for consistency"
+            systemctl stop haproxy 2>/dev/null || true
+            systemctl disable haproxy 2>/dev/null || true
+            success "HAProxy disabled (optional - kube-apiserver + keepalived is sufficient)"
+        fi
     else
-        warning "HAProxy configuration validation failed"
+        # kube-apiserver not detected on 6443 yet (shouldn't happen but handle it)
+        warning "kube-apiserver not detected on port 6443, keeping HAProxy as-is"
+    fi
+
+    # Always verify API is accessible
+    if curl -k "https://$VIP:6443/healthz" &>/dev/null; then
+        success "Kubernetes API accessible via VIP"
+    else
+        warning "API not yet accessible via VIP (may need time to propagate)"
     fi
 }
 
