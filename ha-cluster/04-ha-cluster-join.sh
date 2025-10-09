@@ -100,13 +100,14 @@ check_prerequisites() {
         systemctl start keepalived
         sleep 5
     fi
-    
-    # Check if VIP is accessible
-    if ! ping -c 3 "$VIP" &> /dev/null; then
-        error "Cannot reach VIP $VIP. Ensure k8s-cp1 is initialized and VIP is active"
+
+    # Check if VIP is accessible via Kubernetes API (better than ping)
+    log "Testing VIP accessibility via Kubernetes API..."
+    if ! curl -k --connect-timeout 5 "https://$VIP:6443/healthz" &> /dev/null; then
+        error "Cannot reach Kubernetes API at $VIP:6443. Ensure k8s-cp1 is initialized and VIP is active"
     fi
-    
-    success "Prerequisites check passed for $hostname"
+
+    success "Prerequisites check passed for $hostname (VIP is accessible)"
 }
 
 get_join_information() {
