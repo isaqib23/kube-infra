@@ -111,24 +111,45 @@ check_prerequisites() {
 
 get_join_information() {
     log "Getting join information..."
-    
+
+    # Try to get join info automatically if available
+    if [[ -f /tmp/control-plane-join.sh ]]; then
+        log "Found join script in /tmp/control-plane-join.sh"
+
+        # Parse the join command to extract parameters
+        local join_cmd=$(cat /tmp/control-plane-join.sh | grep "kubeadm join")
+
+        if [[ -n "$join_cmd" ]]; then
+            # Extract token
+            JOIN_TOKEN=$(echo "$join_cmd" | grep -oP '(?<=--token )[^\s\\]+' | tr -d '\\')
+
+            # Extract CA cert hash
+            CA_CERT_HASH=$(echo "$join_cmd" | grep -oP '(?<=--discovery-token-ca-cert-hash )[^\s\\]+' | tr -d '\\')
+
+            # Extract certificate key
+            CERT_KEY=$(echo "$join_cmd" | grep -oP '(?<=--certificate-key )[^\s\\]+' | tr -d '\\')
+
+            if [[ -n "$JOIN_TOKEN" && -n "$CA_CERT_HASH" && -n "$CERT_KEY" ]]; then
+                success "Automatically extracted join information from /tmp/control-plane-join.sh"
+                log "Token: ${JOIN_TOKEN:0:10}..."
+                log "CA Hash: ${CA_CERT_HASH:0:20}..."
+                log "Cert Key: ${CERT_KEY:0:20}..."
+                return 0
+            else
+                warning "Could not parse join information from file"
+            fi
+        fi
+    fi
+
+    # If auto-extraction failed, ask for manual input
+    echo
     echo "=== Join Information Required ==="
     echo "You need the join command from k8s-cp1."
     echo "This can be found in /opt/kubernetes/join-info/control-plane-join.sh on k8s-cp1"
     echo
     echo "Or provide the join parameters manually:"
     echo
-    
-    # Try to get join info automatically if available
-    if [[ -f /tmp/control-plane-join.sh ]]; then
-        log "Found join script in /tmp/control-plane-join.sh"
-        source /tmp/control-plane-join.sh 2>/dev/null || {
-            warning "Could not execute join script. Please provide parameters manually."
-            get_manual_join_info
-        }
-    else
-        get_manual_join_info
-    fi
+    get_manual_join_info
 }
 
 get_manual_join_info() {
