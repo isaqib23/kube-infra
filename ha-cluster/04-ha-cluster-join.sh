@@ -124,37 +124,44 @@ check_prerequisites() {
 }
 
 check_certificate_expiration() {
-    log "Checking if certificates might be expired..."
+    log "Checking certificate and token freshness..."
 
-    # Try to verify the certificate key by checking kubeadm-certs secret on k8s-cp1
-    if timeout 10 kubectl --server="https://$VIP:6443" --insecure-skip-tls-verify get secret kubeadm-certs -n kube-system &>/dev/null; then
-        success "Certificate secret exists and is valid"
-        return 0
+    # NOTE: We cannot use kubectl here because this node hasn't joined yet
+    # Instead, we'll check if the join script exists and is recent
+
+    if [[ -f /tmp/control-plane-join.sh ]]; then
+        # Check if join script is less than 2 hours old (kubeadm-certs TTL)
+        local file_age_seconds=$(($(date +%s) - $(stat -c %Y /tmp/control-plane-join.sh 2>/dev/null || stat -f %m /tmp/control-plane-join.sh 2>/dev/null || echo 0)))
+        local two_hours=$((2 * 60 * 60))
+
+        if [[ $file_age_seconds -lt $two_hours ]]; then
+            success "Join script is fresh (created $(($file_age_seconds / 60)) minutes ago)"
+        else
+            warning "Join script is older than 2 hours - certificates may have expired"
+            echo
+            echo -e "${YELLOW}═══════════════════════════════════════════════════════════${NC}"
+            echo -e "${YELLOW}  WARNING: Join credentials may be expired${NC}"
+            echo -e "${YELLOW}═══════════════════════════════════════════════════════════${NC}"
+            echo
+            echo "The kubeadm-certs Secret expires after 2 hours."
+            echo "Your join script is $(($file_age_seconds / 3600)) hours old."
+            echo
+            echo "If the join fails, regenerate credentials on k8s-cp1:"
+            echo
+            echo -e "${GREEN}  sudo kubeadm init phase upload-certs --upload-certs${NC}"
+            echo -e "${GREEN}  sudo kubeadm token create --ttl 24h${NC}"
+            echo
+            echo "Then update /tmp/control-plane-join.sh on this node."
+            echo
+            read -p "Press ENTER to continue anyway, or Ctrl+C to abort and refresh credentials..."
+            echo
+        fi
     else
-        warning "Certificate secret 'kubeadm-certs' not found or expired"
-        echo
-        echo -e "${RED}═══════════════════════════════════════════════════════════${NC}"
-        echo -e "${RED}  CERTIFICATE KEY EXPIRED${NC}"
-        echo -e "${RED}═══════════════════════════════════════════════════════════${NC}"
-        echo
-        echo "The kubeadm-certs Secret has expired (TTL: 2 hours)"
-        echo
-        echo "To generate fresh certificates, run these commands on k8s-cp1:"
-        echo
-        echo -e "${GREEN}  sudo kubeadm init phase upload-certs --upload-certs${NC}"
-        echo
-        echo "This will output a new certificate key. Then update:"
-        echo "  /tmp/control-plane-join.sh"
-        echo
-        echo "Also check if token is valid:"
-        echo -e "${GREEN}  sudo kubeadm token list${NC}"
-        echo
-        echo "If token expired, create new one:"
-        echo -e "${GREEN}  sudo kubeadm token create --ttl 24h${NC}"
-        echo
-        read -p "Press ENTER after generating fresh certificates on k8s-cp1, or Ctrl+C to exit..."
-        echo
+        log "No join script found at /tmp/control-plane-join.sh"
+        log "Will attempt to proceed - if credentials are invalid, join will fail with clear error"
     fi
+
+    success "Certificate expiration check completed"
 }
 
 get_join_information() {
