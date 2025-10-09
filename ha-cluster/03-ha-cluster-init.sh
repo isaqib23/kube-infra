@@ -226,20 +226,32 @@ pre_pull_images() {
 
 initialize_cluster() {
     log "Initializing Kubernetes cluster..."
-    
+
+    # Check if cluster is already initialized
+    if [[ -f /etc/kubernetes/admin.conf ]]; then
+        log "Cluster configuration already exists, checking if cluster is running..."
+        if kubectl --kubeconfig=/etc/kubernetes/admin.conf get nodes &>/dev/null; then
+            success "Kubernetes cluster is already initialized and running"
+            return 0
+        else
+            warning "Cluster config exists but cluster is not responding, will attempt to reinitialize..."
+        fi
+    fi
+
     # Keep Keepalived running - no conflicts expected with port 16443 HAProxy config
     log "Keeping Keepalived running for VIP management during initialization..."
-    
+
     # Backup DNS configuration before cluster init
     log "Backing up DNS configuration..."
-    cp /etc/resolv.conf /etc/resolv.conf.pre-k8s
-    
+    cp /etc/resolv.conf /etc/resolv.conf.pre-k8s 2>/dev/null || true
+
     # Create audit log directory
     mkdir -p /var/log/kubernetes
-    
+
     # Initialize the cluster
+    log "Running kubeadm init..."
     kubeadm init --config /tmp/kubeadm-config.yaml --upload-certs --v=5
-    
+
     # Restore DNS configuration immediately after cluster init
     log "Restoring DNS configuration after cluster initialization..."
     cat > /etc/resolv.conf << EOF
@@ -248,7 +260,7 @@ nameserver 8.8.4.4
 nameserver 10.255.254.1
 search local
 EOF
-    
+
     success "Kubernetes cluster initialized"
 }
 
@@ -292,10 +304,17 @@ wait_for_api_server() {
 
 install_calico_cni() {
     log "Installing Calico CNI for HA networking..."
-    
+
+    # Check if Calico is already installed
+    if kubectl get namespace calico-system &>/dev/null && \
+       kubectl get pods -n calico-system --no-headers 2>/dev/null | grep -q "Running"; then
+        success "Calico CNI is already installed and running"
+        return 0
+    fi
+
     # Persistent network route establishment
     log "Establishing persistent network connectivity..."
-    
+
     # Fix DNS configuration first
     cat > /etc/resolv.conf << EOF
 nameserver 8.8.8.8
@@ -303,17 +322,17 @@ nameserver 8.8.4.4
 nameserver 10.255.254.1
 search local
 EOF
-    
+
     # Start a persistent ping in background to keep route active
     ping 8.8.8.8 >/dev/null 2>&1 &
     PING_PID=$!
-    
+
     # Wait for route to establish
     sleep 5
-    
+
     # Download Calico manifests with the persistent connection active
     log "Downloading Calico manifests with active network connection..."
-    
+
     # Download with retries while keeping connection alive
     local download_success=false
     for attempt in {1..3}; do
@@ -331,7 +350,7 @@ EOF
             sleep 5
         fi
     done
-    
+
     # Stop the persistent ping
     kill $PING_PID &>/dev/null || true
     
@@ -497,21 +516,118 @@ EOF
     
     # Modify custom-resources for our pod CIDR
     sed -i "s|192.168.0.0/16|${POD_NETWORK_CIDR}|g" custom-resources.yaml
-    
-    # Apply Tigera operator
-    kubectl create -f tigera-operator.yaml
-    
+
+    # Apply Tigera operator (idempotent)
+    log "Applying Tigera operator..."
+    if kubectl get namespace tigera-operator &>/dev/null; then
+        log "Tigera operator namespace already exists, applying updates..."
+        kubectl apply -f tigera-operator.yaml
+    else
+        kubectl create -f tigera-operator.yaml
+    fi
+
+    # Wait for operator deployment to exist
+    log "Waiting for Tigera operator deployment to be created..."
+    local deploy_timeout=60
+    local deploy_counter=0
+    while [[ $deploy_counter -lt $deploy_timeout ]]; do
+        if kubectl get deployment tigera-operator -n tigera-operator &>/dev/null; then
+            success "Tigera operator deployment exists"
+            break
+        fi
+        sleep 2
+        ((deploy_counter+=2))
+    done
+
+    if [[ $deploy_counter -ge $deploy_timeout ]]; then
+        error "Tigera operator deployment was not created within $deploy_timeout seconds"
+    fi
+
     # Wait for operator to be ready
     log "Waiting for Tigera operator to be ready..."
     kubectl wait --for=condition=available --timeout=300s deployment/tigera-operator -n tigera-operator
-    
+
+    # Wait for Installation CRD to be available
+    log "Waiting for Installation CRD to be registered..."
+    local crd_timeout=120
+    local crd_counter=0
+    while [[ $crd_counter -lt $crd_timeout ]]; do
+        if kubectl get crd installations.operator.tigera.io &>/dev/null; then
+            success "Installation CRD is registered and available"
+            break
+        fi
+        sleep 2
+        ((crd_counter+=2))
+        echo -n "."
+    done
+    echo
+
+    if [[ $crd_counter -ge $crd_timeout ]]; then
+        error "Installation CRD did not become available within $crd_timeout seconds"
+    fi
+
+    # Additional wait for CRD to be fully ready in API server
+    log "Waiting for CRD to be fully initialized in API server..."
+    sleep 10
+
     # Apply custom resources
-    kubectl apply -f custom-resources.yaml
-    
+    log "Applying Calico custom resources..."
+    local apply_success=false
+    for apply_attempt in {1..5}; do
+        log "Attempting to apply custom resources (attempt $apply_attempt/5)..."
+        if kubectl apply -f custom-resources.yaml; then
+            apply_success=true
+            success "Custom resources applied successfully"
+            break
+        else
+            warning "Failed to apply custom resources, waiting 10 seconds before retry..."
+            sleep 10
+        fi
+    done
+
+    if [[ "$apply_success" != "true" ]]; then
+        error "Failed to apply Calico custom resources after 5 attempts"
+    fi
+
     # Wait for Calico to be ready
     log "Waiting for Calico pods to be ready..."
-    kubectl wait --for=condition=ready --timeout=600s pod -l app.kubernetes.io/name=calico-node -n calico-system
-    
+
+    # First wait for calico-system namespace
+    local ns_timeout=60
+    local ns_counter=0
+    while [[ $ns_counter -lt $ns_timeout ]]; do
+        if kubectl get namespace calico-system &>/dev/null; then
+            success "calico-system namespace exists"
+            break
+        fi
+        sleep 2
+        ((ns_counter+=2))
+    done
+
+    if [[ $ns_counter -ge $ns_timeout ]]; then
+        error "calico-system namespace was not created within $ns_timeout seconds"
+    fi
+
+    # Wait for calico-node pods to appear
+    log "Waiting for calico-node pods to be created..."
+    local pod_create_timeout=120
+    local pod_create_counter=0
+    while [[ $pod_create_counter -lt $pod_create_timeout ]]; do
+        if kubectl get pods -n calico-system -l app.kubernetes.io/name=calico-node &>/dev/null; then
+            success "calico-node pods are being created"
+            break
+        fi
+        sleep 5
+        ((pod_create_counter+=5))
+    done
+
+    # Now wait for pods to be ready
+    kubectl wait --for=condition=ready --timeout=600s pod -l app.kubernetes.io/name=calico-node -n calico-system || {
+        warning "Calico pods did not become ready in time, checking status..."
+        kubectl get pods -n calico-system -o wide
+        kubectl describe pods -n calico-system -l app.kubernetes.io/name=calico-node | tail -50
+    }
+
     success "Calico CNI installed and configured"
 }
 
