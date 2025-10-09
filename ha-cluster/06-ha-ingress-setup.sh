@@ -422,13 +422,29 @@ EOF
 
 create_default_ssl_certificate() {
     log "Creating default SSL certificate for ingress..."
-    
+
+    # Wait for wildcard certificate to be ready
+    local timeout=60
+    local counter=0
+    while [[ $counter -lt $timeout ]]; do
+        if kubectl get secret wildcard-tls-secret -n default &>/dev/null; then
+            log "Wildcard certificate found"
+            break
+        fi
+        sleep 2
+        ((counter+=2))
+    done
+
     # Copy the wildcard certificate to ingress namespace
-    kubectl get secret wildcard-tls-secret -o yaml | \
+    # Use --dry-run=client to avoid conflicts
+    kubectl get secret wildcard-tls-secret -n default -o yaml | \
     sed 's/namespace: default/namespace: ingress-nginx/' | \
     sed 's/name: wildcard-tls-secret/name: default-ssl-certificate/' | \
+    sed '/resourceVersion:/d' | \
+    sed '/uid:/d' | \
+    sed '/creationTimestamp:/d' | \
     kubectl apply -f -
-    
+
     success "Default SSL certificate configured"
 }
 
