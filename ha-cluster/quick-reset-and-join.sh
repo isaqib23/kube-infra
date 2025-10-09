@@ -59,7 +59,13 @@ reset_kubernetes() {
     rm -rf /etc/kubernetes/
     rm -rf /var/lib/etcd/
     rm -rf ~/.kube/
-    rm -rf /home/*/. kube/
+
+    # Remove .kube from user home directories
+    for user_home in /home/*; do
+        if [[ -d "$user_home/.kube" ]]; then
+            rm -rf "$user_home/.kube"
+        fi
+    done
 
     # Remove CNI configs
     rm -rf /etc/cni/net.d/
