@@ -116,28 +116,27 @@ get_join_information() {
     if [[ -f /tmp/control-plane-join.sh ]]; then
         log "Found join script in /tmp/control-plane-join.sh"
 
-        # Parse the join command to extract parameters
-        local join_cmd=$(cat /tmp/control-plane-join.sh | grep "kubeadm join")
+        # Parse the join command to extract parameters (handles multi-line)
+        # Extract token
+        JOIN_TOKEN=$(grep -A 10 "kubeadm join" /tmp/control-plane-join.sh | grep -o -- '--token [^ \\]*' | awk '{print $2}')
 
-        if [[ -n "$join_cmd" ]]; then
-            # Extract token
-            JOIN_TOKEN=$(echo "$join_cmd" | grep -oP '(?<=--token )[^\s\\]+' | tr -d '\\')
+        # Extract CA cert hash
+        CA_CERT_HASH=$(grep -A 10 "kubeadm join" /tmp/control-plane-join.sh | grep -o -- '--discovery-token-ca-cert-hash [^ \\]*' | awk '{print $2}')
 
-            # Extract CA cert hash
-            CA_CERT_HASH=$(echo "$join_cmd" | grep -oP '(?<=--discovery-token-ca-cert-hash )[^\s\\]+' | tr -d '\\')
+        # Extract certificate key
+        CERT_KEY=$(grep -A 10 "kubeadm join" /tmp/control-plane-join.sh | grep -o -- '--certificate-key [^ \\]*' | awk '{print $2}')
 
-            # Extract certificate key
-            CERT_KEY=$(echo "$join_cmd" | grep -oP '(?<=--certificate-key )[^\s\\]+' | tr -d '\\')
-
-            if [[ -n "$JOIN_TOKEN" && -n "$CA_CERT_HASH" && -n "$CERT_KEY" ]]; then
-                success "Automatically extracted join information from /tmp/control-plane-join.sh"
-                log "Token: ${JOIN_TOKEN:0:10}..."
-                log "CA Hash: ${CA_CERT_HASH:0:20}..."
-                log "Cert Key: ${CERT_KEY:0:20}..."
-                return 0
-            else
-                warning "Could not parse join information from file"
-            fi
+        if [[ -n "$JOIN_TOKEN" && -n "$CA_CERT_HASH" && -n "$CERT_KEY" ]]; then
+            success "Automatically extracted join information from /tmp/control-plane-join.sh"
+            log "Token: ${JOIN_TOKEN}"
+            log "CA Hash: ${CA_CERT_HASH:0:30}..."
+            log "Cert Key: ${CERT_KEY:0:30}..."
+            return 0
+        else
+            warning "Could not parse join information from file"
+            log "Token found: ${JOIN_TOKEN:-EMPTY}"
+            log "CA Hash found: ${CA_CERT_HASH:-EMPTY}"
+            log "Cert Key found: ${CERT_KEY:-EMPTY}"
         fi
     fi
 
