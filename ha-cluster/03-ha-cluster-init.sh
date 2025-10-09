@@ -847,66 +847,112 @@ restart_ha_services() {
     local vip_count=0
     while [[ $vip_count -lt $vip_wait ]]; do
         if ip addr show | grep -q "$VIP"; then
-            success "VIP $VIP is assigned"
+            success "VIP $VIP is assigned to this node"
             break
         fi
         sleep 2
         ((vip_count+=2))
     done
 
-    if [[ $vip_count -ge $vip_wait ]]; then
-        warning "VIP not assigned to this node, HAProxy will use server IP instead"
+    # Check if kube-apiserver is already listening on port 6443
+    log "Checking port 6443 usage..."
+    if netstat -tlnp 2>/dev/null | grep -q ":6443.*kube-apiserver" || \
+       ss -tlnp 2>/dev/null | grep -q ":6443.*kube-apiserver"; then
+
+        warning "kube-apiserver is already listening on *:6443 (including VIP)"
+        warning "HAProxy would conflict with kube-apiserver on VIP:6443"
+
+        # Check if API is accessible via VIP
+        if curl -k "https://$VIP:6443/healthz" &>/dev/null; then
+            success "Kubernetes API is accessible via VIP without HAProxy"
+
+            log "Stopping HAProxy to avoid port conflict..."
+            systemctl stop haproxy 2>/dev/null || true
+            systemctl disable haproxy 2>/dev/null || true
+
+            cat << EOF
+
+╔════════════════════════════════════════════════════════════════════════════╗
+║                         HAProxy Configuration Notice                        ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+HAProxy has been STOPPED on this node because:
+
+  • kube-apiserver is already listening on *:6443 (all interfaces)
+  • This includes the VIP (${VIP}:6443)
+  • HAProxy cannot bind to the same address → would cause conflict
+
+Current State:
+  ✓ Kubernetes API is accessible via VIP: ${VIP}:6443
+  ✓ Keepalived is managing VIP failover
+  ✓ No HAProxy needed for single control plane
+
+After Joining Other Control Planes:
+  1. All control planes will have kube-apiserver on port 6443
+  2. Keepalived will manage VIP failover between nodes
+  3. HAProxy can remain disabled (kube-apiserver handles the load)
+
+Alternative: If you want HAProxy for monitoring/stats:
+  • Configure HAProxy to use a different port (e.g., 8443)
+  • Or run HAProxy only on nodes WITHOUT the VIP
+
+For details, see: HAPROXY_VIP_CONFLICT_RESOLUTION.md
+
+EOF
+
+            success "HA services configured (HAProxy disabled, Keepalived active)"
+            return 0
+        else
+            warning "API not accessible via VIP, will attempt HAProxy configuration"
+        fi
     fi
 
-    # Update HAProxy configuration to use proper port
-    log "Updating HAProxy configuration for Kubernetes API load balancing..."
+    # If we reach here, try to configure HAProxy
+    log "Configuring HAProxy for Kubernetes API load balancing..."
 
     # Stop HAProxy temporarily
     systemctl stop haproxy 2>/dev/null || true
 
-    # Check if VIP is assigned to this node
-    if ip addr show | grep -q "$VIP"; then
-        log "VIP is assigned to this node, configuring HAProxy to bind to VIP:6443"
-        # Update HAProxy config to use VIP and proper port
-        sed -i 's/bind.*16443/bind '"$VIP"':6443\n    bind '"${CONTROL_PLANES[k8s-cp1]}"':6443/' /etc/haproxy/haproxy.cfg
-        sed -i 's/bind 127.0.0.1:16443/bind 127.0.0.1:6443/' /etc/haproxy/haproxy.cfg
-    else
-        log "VIP is not on this node, configuring HAProxy to bind to server IP only"
-        # Update HAProxy config to use server IP and proper port
-        sed -i 's/bind.*16443/bind '"${CONTROL_PLANES[k8s-cp1]}"':6443/' /etc/haproxy/haproxy.cfg
-        sed -i 's/bind 127.0.0.1:16443/bind 127.0.0.1:6443/' /etc/haproxy/haproxy.cfg
-    fi
+    # Update HAProxy config to bind to alternate port to avoid conflict
+    log "Configuring HAProxy to use port 8443 to avoid conflict with kube-apiserver..."
+    sed -i 's/bind.*16443/bind *:8443/' /etc/haproxy/haproxy.cfg
+    sed -i 's/bind 127.0.0.1:16443/bind 127.0.0.1:8443/' /etc/haproxy/haproxy.cfg
 
     # Validate configuration
     log "Validating HAProxy configuration..."
     if haproxy -f /etc/haproxy/haproxy.cfg -c 2>&1 | tee /tmp/haproxy-validation.log; then
         success "HAProxy configuration is valid"
-    else
-        error "HAProxy configuration validation failed. Check /tmp/haproxy-validation.log for details"
-    fi
 
-    # Start HAProxy
-    log "Starting HAProxy..."
-    if systemctl start haproxy; then
-        success "HAProxy started successfully"
-    else
-        warning "HAProxy failed to start, checking logs..."
-        journalctl -xeu haproxy.service --no-pager -n 50
-        warning "HAProxy not running but continuing deployment"
-    fi
-
-    # Test API accessibility
-    sleep 5
-    local test_endpoints=("127.0.0.1:6443" "${CONTROL_PLANES[k8s-cp1]}:6443")
-    for endpoint in "${test_endpoints[@]}"; do
-        if curl -k "https://$endpoint/healthz" &>/dev/null; then
-            success "Kubernetes API accessible via $endpoint"
+        # Try to start HAProxy
+        if systemctl start haproxy; then
+            success "HAProxy started on port 8443"
+            systemctl enable haproxy
         else
-            warning "API not accessible via $endpoint yet"
+            warning "HAProxy failed to start, keeping it disabled"
+            systemctl disable haproxy
         fi
-    done
+    else
+        warning "HAProxy configuration validation failed, keeping it disabled"
+        systemctl disable haproxy
+    fi
 
-    success "HA services update completed"
+    # Test API accessibility via different endpoints
+    log "Testing API accessibility..."
+    sleep 3
+
+    if curl -k "https://127.0.0.1:6443/healthz" &>/dev/null; then
+        success "✓ Kubernetes API accessible via localhost:6443"
+    fi
+
+    if curl -k "https://${CONTROL_PLANES[k8s-cp1]}:6443/healthz" &>/dev/null; then
+        success "✓ Kubernetes API accessible via server IP:6443"
+    fi
+
+    if curl -k "https://$VIP:6443/healthz" &>/dev/null; then
+        success "✓ Kubernetes API accessible via VIP:6443"
+    fi
+
+    success "HA services configuration completed"
 }
 
 show_completion_info() {
