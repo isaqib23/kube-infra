@@ -104,8 +104,8 @@ install_cert_manager() {
     # Create namespace
     kubectl create namespace cert-manager --dry-run=client -o yaml | kubectl apply -f -
     
-    # Install cert-manager with CRDs
-    helm install cert-manager jetstack/cert-manager \
+    # Install or upgrade cert-manager with CRDs
+    helm upgrade --install cert-manager jetstack/cert-manager \
         --namespace cert-manager \
         --version v1.15.3 \
         --set installCRDs=true \
@@ -384,8 +384,8 @@ tcp: {}
 udp: {}
 EOF
     
-    # Install NGINX Ingress
-    helm install ingress-nginx ingress-nginx/ingress-nginx \
+    # Install or upgrade NGINX Ingress
+    helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
         --namespace ingress-nginx \
         --create-namespace \
         --values /tmp/nginx-ingress-values.yaml \

@@ -369,8 +369,8 @@ coreDns:
   enabled: true
 EOF
 
-    # Install Prometheus stack
-    helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+    # Install or upgrade Prometheus stack
+    helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
         --namespace monitoring \
         --values /tmp/prometheus-stack-values.yaml \
         --wait \
@@ -600,8 +600,8 @@ grafana-agent:
   enabled: false
 EOF
 
-    # Install Loki stack
-    helm install loki-stack grafana/loki-stack \
+    # Install or upgrade Loki stack
+    helm upgrade --install loki-stack grafana/loki-stack \
         --namespace monitoring \
         --values /tmp/loki-stack-values.yaml \
         --wait \
