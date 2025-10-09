@@ -9,15 +9,15 @@ set -euo pipefail
 LOG_FILE="/var/log/ha-ingress-setup.log"
 
 # Ingress configuration
-VIP="192.168.1.100"
+VIP="10.255.254.100"
 CLUSTER_DOMAIN="k8s.local"
 
 # Control plane servers
 declare -A CONTROL_PLANES=(
-    ["k8s-cp1"]="192.168.1.10"
-    ["k8s-cp2"]="192.168.1.11"
-    ["k8s-cp3"]="192.168.1.12"
-    ["k8s-cp4"]="192.168.1.13"
+    ["k8s-cp1"]="10.255.254.10"
+    ["k8s-cp2"]="10.255.254.11"
+    ["k8s-cp3"]="10.255.254.12"
+    ["k8s-cp4"]="10.255.254.13"
 )
 
 # Colors for output
@@ -293,10 +293,11 @@ controller:
     enableHttps: true
   
   # Enable metrics for monitoring
+  # NOTE: ServiceMonitor disabled until Prometheus Operator is installed (script 07)
   metrics:
     enabled: true
     serviceMonitor:
-      enabled: true
+      enabled: false
       namespace: monitoring
       additionalLabels:
         app: nginx-ingress

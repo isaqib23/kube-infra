@@ -9,16 +9,16 @@ set -euo pipefail
 LOG_FILE="/var/log/ha-cluster-validation.log"
 
 # Test configuration
-VIP="192.168.1.100"
+VIP="10.255.254.100"
 CLUSTER_DOMAIN="k8s.local"
 TEST_NAMESPACE="validation-tests"
 
 # Control plane servers
 declare -A CONTROL_PLANES=(
-    ["k8s-cp1"]="192.168.1.10"
-    ["k8s-cp2"]="192.168.1.11"
-    ["k8s-cp3"]="192.168.1.12"
-    ["k8s-cp4"]="192.168.1.13"
+    ["k8s-cp1"]="10.255.254.10"
+    ["k8s-cp2"]="10.255.254.11"
+    ["k8s-cp3"]="10.255.254.12"
+    ["k8s-cp4"]="10.255.254.13"
 )
 
 # Test results tracking
