@@ -833,39 +833,80 @@ verify_cluster_health() {
 
 restart_ha_services() {
     log "Updating HA services for Kubernetes integration..."
-    
+
     # Ensure Keepalived is running and VIP is assigned
     if ! systemctl is-active --quiet keepalived; then
+        log "Starting Keepalived..."
         systemctl start keepalived
         sleep 10
     fi
-    
-    # Update HAProxy configuration to use VIP:6443 for API frontend
+
+    # Wait for VIP to be assigned
+    log "Waiting for VIP to be assigned..."
+    local vip_wait=60
+    local vip_count=0
+    while [[ $vip_count -lt $vip_wait ]]; do
+        if ip addr show | grep -q "$VIP"; then
+            success "VIP $VIP is assigned"
+            break
+        fi
+        sleep 2
+        ((vip_count+=2))
+    done
+
+    if [[ $vip_count -ge $vip_wait ]]; then
+        warning "VIP not assigned to this node, HAProxy will use server IP instead"
+    fi
+
+    # Update HAProxy configuration to use proper port
     log "Updating HAProxy configuration for Kubernetes API load balancing..."
-    
+
     # Stop HAProxy temporarily
     systemctl stop haproxy 2>/dev/null || true
-    
-    # Update HAProxy config to use VIP and proper port
-    sed -i 's/bind.*16443/bind '"$VIP"':6443/' /etc/haproxy/haproxy.cfg
-    sed -i 's/bind 127.0.0.1:16443/bind 127.0.0.1:6443/' /etc/haproxy/haproxy.cfg
-    
-    # Validate and start HAProxy
-    if haproxy -f /etc/haproxy/haproxy.cfg -c; then
-        systemctl start haproxy
-        success "HAProxy updated and started for Kubernetes integration"
+
+    # Check if VIP is assigned to this node
+    if ip addr show | grep -q "$VIP"; then
+        log "VIP is assigned to this node, configuring HAProxy to bind to VIP:6443"
+        # Update HAProxy config to use VIP and proper port
+        sed -i 's/bind.*16443/bind '"$VIP"':6443\n    bind '"${CONTROL_PLANES[k8s-cp1]}"':6443/' /etc/haproxy/haproxy.cfg
+        sed -i 's/bind 127.0.0.1:16443/bind 127.0.0.1:6443/' /etc/haproxy/haproxy.cfg
     else
-        warning "HAProxy configuration validation failed, but continuing..."
+        log "VIP is not on this node, configuring HAProxy to bind to server IP only"
+        # Update HAProxy config to use server IP and proper port
+        sed -i 's/bind.*16443/bind '"${CONTROL_PLANES[k8s-cp1]}"':6443/' /etc/haproxy/haproxy.cfg
+        sed -i 's/bind 127.0.0.1:16443/bind 127.0.0.1:6443/' /etc/haproxy/haproxy.cfg
     fi
-    
-    # Test VIP accessibility
-    if curl -k "https://$VIP:6443/healthz" &>/dev/null; then
-        success "Kubernetes API accessible via VIP"
+
+    # Validate configuration
+    log "Validating HAProxy configuration..."
+    if haproxy -f /etc/haproxy/haproxy.cfg -c 2>&1 | tee /tmp/haproxy-validation.log; then
+        success "HAProxy configuration is valid"
     else
-        warning "VIP may take time to propagate"
+        error "HAProxy configuration validation failed. Check /tmp/haproxy-validation.log for details"
     fi
-    
-    success "HA services updated for Kubernetes integration"
+
+    # Start HAProxy
+    log "Starting HAProxy..."
+    if systemctl start haproxy; then
+        success "HAProxy started successfully"
+    else
+        warning "HAProxy failed to start, checking logs..."
+        journalctl -xeu haproxy.service --no-pager -n 50
+        warning "HAProxy not running but continuing deployment"
+    fi
+
+    # Test API accessibility
+    sleep 5
+    local test_endpoints=("127.0.0.1:6443" "${CONTROL_PLANES[k8s-cp1]}:6443")
+    for endpoint in "${test_endpoints[@]}"; do
+        if curl -k "https://$endpoint/healthz" &>/dev/null; then
+            success "Kubernetes API accessible via $endpoint"
+        else
+            warning "API not accessible via $endpoint yet"
+        fi
+    done
+
+    success "HA services update completed"
 }
 
 show_completion_info() {
