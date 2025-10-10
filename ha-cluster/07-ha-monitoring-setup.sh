@@ -419,7 +419,7 @@ singleBinary:
   # Persistence configuration with proper permissions
   persistence:
     enabled: true
-    storageClass: fast-ssd
+    storageClass: logs-storage
     size: 100Gi
     accessModes:
       - ReadWriteOnce
