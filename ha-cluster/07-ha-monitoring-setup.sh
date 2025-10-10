@@ -414,7 +414,7 @@ loki:
 deploymentMode: SingleBinary
 
 singleBinary:
-  replicas: 2
+  replicas: 1
 
   # Persistence configuration with proper permissions
   persistence:
