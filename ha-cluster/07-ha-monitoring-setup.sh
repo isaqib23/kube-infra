@@ -163,11 +163,12 @@ prometheus:
                 - prometheus
             topologyKey: kubernetes.io/hostname
     
-    # Security context
+    # Security context - Fixed for permission issues
     securityContext:
       runAsNonRoot: true
-      runAsUser: 1000
-      fsGroup: 2000
+      runAsUser: 65534  # nobody user
+      fsGroup: 65534
+      fsGroupChangePolicy: "OnRootMismatch"
     
     # Additional scrape configs
     additionalScrapeConfigs:
@@ -274,9 +275,8 @@ grafana:
     log:
       mode: console
       level: info
-    alerting:
+    unified_alerting:
       enabled: true
-      execute_alerts: true
   
   # Data sources
   sidecar:
