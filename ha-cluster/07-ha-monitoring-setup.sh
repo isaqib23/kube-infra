@@ -381,208 +381,85 @@ EOF
 
 install_loki_stack() {
     log "Installing Loki stack for log aggregation..."
-    
+
     # Add grafana repository
     helm repo add grafana https://grafana.github.io/helm-charts
     helm repo update
-    
-    # Create values file for HA Loki
-    cat > /tmp/loki-stack-values.yaml << EOF
-# Loki Stack HA Configuration
+
+    # Create values file for Loki (simple single-binary mode)
+    cat > /tmp/loki-values.yaml << EOF
+# Loki Single Binary Configuration with Persistence
+# Simplified deployment for reliable operation
 
 loki:
-  enabled: true
-  isDefault: true
-  
-  # HA configuration for Loki
-  config:
-    auth_enabled: false
-    server:
-      http_listen_port: 3100
-      grpc_listen_port: 9096
-    
-    common:
-      storage:
-        filesystem:
-          chunks_directory: /var/loki/chunks
-          rules_directory: /var/loki/rules
-      replication_factor: 2
-    
-    memberlist:
-      join_members: ["loki-memberlist"]
-    
-    ingester:
-      wal:
-        enabled: true
-        dir: /var/loki/wal
-      lifecycler:
-        address: 127.0.0.1
-        ring:
-          kvstore:
-            store: memberlist
-          replication_factor: 2
-        final_sleep: 0s
-      chunk_idle_period: 5m
-      max_chunk_age: 1h
-      chunk_target_size: 1048576
-      chunk_retain_period: 30s
-    
-    limits_config:
-      retention_period: 744h # 31 days
-      enforce_metric_name: false
-      reject_old_samples: true
-      reject_old_samples_max_age: 168h
-    
-    schema_config:
-      configs:
-        - from: 2020-10-24
-          store: boltdb-shipper
-          object_store: filesystem
-          schema: v11
-          index:
-            prefix: index_
-            period: 24h
-    
-    storage_config:
-      boltdb_shipper:
-        active_index_directory: /var/loki/boltdb-shipper-active
-        cache_location: /var/loki/boltdb-shipper-cache
-        cache_ttl: 24h
-        shared_store: filesystem
-      filesystem:
-        directory: /var/loki/chunks
-    
-    compactor:
-      working_directory: /var/loki/boltdb-shipper-compactor
-      shared_store: filesystem
-    
-    analytics:
-      reporting_enabled: false
-  
-  # Deployment configuration
-  deploymentMode: Distributed
-  
-  # Components
-  gateway:
-    enabled: true
-    replicas: 2
-    resources:
-      limits:
-        memory: 512Mi
-        cpu: 250m
-      requests:
-        memory: 256Mi
-        cpu: 100m
-  
-  write:
-    replicas: 3
-    persistence:
-      enabled: true
-      storageClass: fast-ssd
-      size: 50Gi
-    resources:
-      limits:
-        memory: 2Gi
-        cpu: 1000m
-      requests:
-        memory: 1Gi
-        cpu: 500m
-  
-  read:
-    replicas: 3
-    persistence:
-      enabled: true
-      storageClass: fast-ssd
-      size: 50Gi
-    resources:
-      limits:
-        memory: 2Gi
-        cpu: 1000m
-      requests:
-        memory: 1Gi
-        cpu: 500m
-  
-  backend:
-    replicas: 3
-    persistence:
-      enabled: true
-      storageClass: fast-ssd
-      size: 50Gi
-    resources:
-      limits:
-        memory: 2Gi
-        cpu: 1000m
-      requests:
-        memory: 1Gi
-        cpu: 500m
+  auth_enabled: false
 
-# Promtail configuration
-promtail:
-  enabled: true
-  
-  # Deploy on all nodes
-  daemonset:
+  commonConfig:
+    replication_factor: 1
+
+  storage:
+    type: 'filesystem'
+
+  schemaConfig:
+    configs:
+      - from: 2024-01-01
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: loki_index_
+          period: 24h
+
+# Deployment mode - using SingleBinary for simplicity and reliability
+deploymentMode: SingleBinary
+
+singleBinary:
+  replicas: 2
+
+  # Persistence configuration with proper permissions
+  persistence:
     enabled: true
-  
-  config:
-    serverPort: 3101
-    clients:
-      - url: http://loki-gateway/loki/api/v1/push
-    
-    positions:
-      filename: /run/promtail/positions.yaml
-    
-    scrape_configs:
-    - job_name: containers
-      static_configs:
-      - targets:
-        - localhost
-        labels:
-          job: containerlogs
-          __path__: /var/log/pods/*/*/*.log
-      
-      pipeline_stages:
-      - json:
-          expressions:
-            output: log
-            stream: stream
-            attrs:
-      - json:
-          expressions:
-            tag: attrs.tag
-          source: attrs
-      - regex:
-          expression: (?P<container_name>(?:[^/]*/)*)(?P<pod_name>[^/]+)_(?P<namespace>[^/]+)_(?P<container>.+)-.+\.log
-          source: filename
-      - timestamp:
-          format: RFC3339Nano
-          source: time
-      - labels:
-          stream:
-          container_name:
-          pod_name:
-          namespace:
-          container:
-      - output:
-          source: output
-    
-    - job_name: syslog
-      static_configs:
-      - targets:
-        - localhost
-        labels:
-          job: syslog
-          __path__: /var/log/syslog
-    
-    - job_name: kubernetes-audit
-      static_configs:
-      - targets:
-        - localhost
-        labels:
-          job: kubernetes-audit
-          __path__: /var/log/kubernetes/audit.log
-  
-  # Resource allocation
+    storageClass: fast-ssd
+    size: 100Gi
+    accessModes:
+      - ReadWriteOnce
+
+  # Security context to fix permission issues
+  podSecurityContext:
+    fsGroup: 10001
+    runAsGroup: 10001
+    runAsNonRoot: true
+    runAsUser: 10001
+    fsGroupChangePolicy: "OnRootMismatch"
+
+  # Resource allocation for R740
+  resources:
+    limits:
+      memory: 2Gi
+      cpu: 1000m
+    requests:
+      memory: 1Gi
+      cpu: 500m
+
+  # Anti-affinity for HA distribution
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+            - key: app.kubernetes.io/component
+              operator: In
+              values:
+              - single-binary
+          topologyKey: kubernetes.io/hostname
+
+# Gateway configuration
+gateway:
+  enabled: true
+  replicas: 2
+
   resources:
     limits:
       memory: 512Mi
@@ -591,22 +468,154 @@ promtail:
       memory: 256Mi
       cpu: 100m
 
-# Fluent Bit (alternative to Promtail)
-fluent-bit:
+# Monitoring integration
+monitoring:
+  selfMonitoring:
+    enabled: false
+    grafanaAgent:
+      installOperator: false
+
+  serviceMonitor:
+    enabled: true
+
+# Loki Canary for testing
+lokiCanary:
   enabled: false
 
-# Grafana Agent
-grafana-agent:
+# Test pod
+test:
   enabled: false
+
+# Read component (disabled in SingleBinary mode)
+read:
+  replicas: 0
+
+# Write component (disabled in SingleBinary mode)
+write:
+  replicas: 0
+
+# Backend component (disabled in SingleBinary mode)
+backend:
+  replicas: 0
 EOF
 
-    # Install or upgrade Loki stack
-    helm upgrade --install loki-stack grafana/loki-stack \
+    # Create Promtail values for log collection
+    cat > /tmp/promtail-values.yaml << EOF
+# Promtail Configuration for Log Collection
+
+config:
+  # Loki endpoint
+  clients:
+    - url: http://loki-gateway/loki/api/v1/push
+      tenant_id: 1
+
+  # Positions file
+  positions:
+    filename: /run/promtail/positions.yaml
+
+  # Scrape configs
+  snippets:
+    scrapeConfigs: |
+      # Pod logs
+      - job_name: kubernetes-pods
+        pipeline_stages:
+          - cri: {}
+        kubernetes_sd_configs:
+          - role: pod
+        relabel_configs:
+          - source_labels:
+              - __meta_kubernetes_pod_controller_name
+            regex: ([0-9a-z-.]+?)(-[0-9a-f]{8,10})?
+            action: replace
+            target_label: __tmp_controller_name
+          - source_labels:
+              - __meta_kubernetes_pod_label_app_kubernetes_io_name
+              - __meta_kubernetes_pod_label_app
+              - __tmp_controller_name
+              - __meta_kubernetes_pod_name
+            regex: ^;*([^;]+)(;.*)?$
+            action: replace
+            target_label: app
+          - source_labels:
+              - __meta_kubernetes_pod_label_app_kubernetes_io_component
+              - __meta_kubernetes_pod_label_component
+            regex: ^;*([^;]+)(;.*)?$
+            action: replace
+            target_label: component
+          - action: replace
+            source_labels:
+            - __meta_kubernetes_pod_node_name
+            target_label: node_name
+          - action: replace
+            source_labels:
+            - __meta_kubernetes_namespace
+            target_label: namespace
+          - action: replace
+            replacement: \$1
+            separator: /
+            source_labels:
+            - namespace
+            - app
+            target_label: job
+          - action: replace
+            source_labels:
+            - __meta_kubernetes_pod_name
+            target_label: pod
+          - action: replace
+            source_labels:
+            - __meta_kubernetes_pod_container_name
+            target_label: container
+          - action: replace
+            replacement: /var/log/pods/*\$1/*.log
+            separator: /
+            source_labels:
+            - __meta_kubernetes_pod_uid
+            - __meta_kubernetes_pod_container_name
+            target_label: __path__
+          - action: replace
+            regex: true/(.*)
+            replacement: /var/log/pods/*\$1/*.log
+            separator: /
+            source_labels:
+            - __meta_kubernetes_pod_annotationpresent_kubernetes_io_config_hash
+            - __meta_kubernetes_pod_annotation_kubernetes_io_config_hash
+            - __meta_kubernetes_pod_container_name
+            target_label: __path__
+
+# DaemonSet to run on all nodes
+daemonset:
+  enabled: true
+
+# Resource allocation
+resources:
+  limits:
+    memory: 512Mi
+    cpu: 250m
+  requests:
+    memory: 256Mi
+    cpu: 100m
+
+# Service Monitor for Prometheus integration
+serviceMonitor:
+  enabled: true
+EOF
+
+    # Install Loki
+    log "Installing Loki..."
+    helm upgrade --install loki grafana/loki \
         --namespace monitoring \
-        --values /tmp/loki-stack-values.yaml \
+        --values /tmp/loki-values.yaml \
         --wait \
-        --timeout 15m
-    
+        --timeout 10m
+
+    # Install Promtail
+    log "Installing Promtail..."
+    helm upgrade --install promtail grafana/promtail \
+        --namespace monitoring \
+        --values /tmp/promtail-values.yaml \
+        --wait \
+        --timeout 5m
+
     success "Loki stack installed"
 }
 
@@ -1028,19 +1037,22 @@ EOF
 
 wait_for_monitoring_ready() {
     log "Waiting for monitoring stack to be ready..."
-    
+
     # Wait for Prometheus
     kubectl wait --for=condition=available --timeout=600s deployment/kube-prometheus-stack-operator -n monitoring
-    
+
     # Wait for Grafana
     kubectl wait --for=condition=available --timeout=600s deployment/kube-prometheus-stack-grafana -n monitoring
-    
+
     # Wait for AlertManager
     kubectl wait --for=condition=ready --timeout=600s pod -l app.kubernetes.io/name=alertmanager -n monitoring
-    
+
+    # Wait for Loki (StatefulSet in single-binary mode)
+    kubectl wait --for=condition=ready --timeout=600s pod -l app.kubernetes.io/component=single-binary -n monitoring || warning "Loki not ready"
+
     # Wait for Loki gateway
-    kubectl wait --for=condition=available --timeout=600s deployment/loki-stack-gateway -n monitoring || warning "Loki gateway not ready"
-    
+    kubectl wait --for=condition=available --timeout=600s deployment/loki-gateway -n monitoring || warning "Loki gateway not ready"
+
     success "Monitoring stack is ready"
 }
 

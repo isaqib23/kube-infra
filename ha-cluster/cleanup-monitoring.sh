@@ -69,6 +69,16 @@ main() {
         warning "loki-stack not found"
     fi
 
+    if helm list -n monitoring | grep -q "loki"; then
+        helm uninstall loki -n monitoring || warning "Failed to uninstall loki"
+        success "loki uninstalled"
+    fi
+
+    if helm list -n monitoring | grep -q "promtail"; then
+        helm uninstall promtail -n monitoring || warning "Failed to uninstall promtail"
+        success "promtail uninstalled"
+    fi
+
     # Step 2: Wait for pods to terminate
     log "Waiting for pods to terminate..."
     sleep 30
