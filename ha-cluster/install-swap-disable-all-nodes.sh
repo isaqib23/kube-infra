@@ -49,6 +49,42 @@ banner() {
     echo
 }
 
+install_on_local_node() {
+    local node_name="$1"
+
+    log "Installing permanent swap disable on $node_name (local)..."
+
+    # Install locally without SSH
+    cp "$SCRIPT_DIR/disable-swap-permanent.sh" /usr/local/bin/
+    chmod +x /usr/local/bin/disable-swap-permanent.sh
+
+    # Run the script
+    /usr/local/bin/disable-swap-permanent.sh
+
+    # Install systemd service
+    cp "$SCRIPT_DIR/disable-swap-kubernetes.service" /etc/systemd/system/
+
+    # Enable and start service
+    systemctl daemon-reload
+    systemctl enable disable-swap-kubernetes.service
+    systemctl start disable-swap-kubernetes.service
+
+    # Verify
+    systemctl status disable-swap-kubernetes.service --no-pager
+
+    echo ""
+    echo "Swap status:"
+    swapon --show || echo "No swap enabled (GOOD)"
+
+    if [ $? -eq 0 ]; then
+        success "Permanent swap disable installed on $node_name"
+        return 0
+    else
+        error "Failed to install on $node_name"
+        return 1
+    fi
+}
+
 install_on_node() {
     local node_ip="$1"
     local node_name="$2"
@@ -126,15 +162,29 @@ main() {
 
     success "Found required files"
 
+    # Get local IP to detect which node we're on
+    local local_ip=$(hostname -I | awk '{print $1}')
+    log "Detected local IP: $local_ip"
+
     # Install on all nodes
     local failed_nodes=0
     for node_entry in "${NODES[@]}"; do
         IFS=':' read -r node_ip node_name <<< "$node_entry"
 
         echo ""
-        install_on_node "$node_ip" "$node_name"
-        if [ $? -ne 0 ]; then
-            ((failed_nodes++))
+
+        # Check if this is the local node
+        if [ "$node_ip" == "$local_ip" ] || [ "$node_name" == "$(hostname)" ]; then
+            log "Detected local node: $node_name"
+            install_on_local_node "$node_name"
+            if [ $? -ne 0 ]; then
+                ((failed_nodes++))
+            fi
+        else
+            install_on_node "$node_ip" "$node_name"
+            if [ $? -ne 0 ]; then
+                ((failed_nodes++))
+            fi
         fi
 
         echo ""
