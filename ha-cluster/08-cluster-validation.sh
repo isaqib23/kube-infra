@@ -144,7 +144,7 @@ test_cluster_basic_functionality() {
     fi
     
     # Test 4: DNS resolution
-    if kubectl run dns-test --image=busybox:1.36 --rm -it --restart=Never --namespace="$TEST_NAMESPACE" -- nslookup kubernetes.default.svc.cluster.local &>/dev/null; then
+    if kubectl run dns-test --image=busybox:1.36 --rm --restart=Never --namespace="$TEST_NAMESPACE" -- nslookup kubernetes.default.svc.cluster.local &>/dev/null; then
         test_pass "DNS resolution working"
     else
         test_fail "DNS resolution" "Cannot resolve kubernetes.default.svc.cluster.local"
