@@ -14,7 +14,7 @@ LOG_FILE="/var/log/dev-k8s-prep.log"
 
 # Server configuration - Single node development environment
 SERVER_NAME="k8s-dev1"
-SERVER_IP="10.255.252.10"
+SERVER_IP="10.255.254.10"
 # No VIP for single-node cluster
 VIP=""
 
@@ -119,7 +119,7 @@ network:
       dhcp4: false
       addresses:
         - $SERVER_IP/24
-      gateway4: 10.255.252.1
+      gateway4: 10.255.254.1
       nameservers:
         addresses:
           - 8.8.8.8
@@ -278,7 +278,7 @@ configure_firewall() {
     ufw allow 8404/tcp
     
 # Allow all traffic from cluster subnet
-    ufw allow from 10.255.252.0/24
+    ufw allow from 10.255.254.0/24
     ufw allow from 192.168.0.0/16  # Pod network
     ufw allow from 10.96.0.0/12    # Service network
     

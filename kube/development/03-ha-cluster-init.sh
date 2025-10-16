@@ -10,7 +10,7 @@ LOG_FILE="/var/log/dev-cluster-init.log"
 
 # Cluster configuration - Single node, no VIP
 SERVER_NAME="k8s-dev1"
-SERVER_IP="10.255.252.10"
+SERVER_IP="10.255.254.10"
 CLUSTER_NAME="dev-k8s-cluster"
 POD_NETWORK_CIDR="192.168.0.0/16"
 SERVICE_CIDR="10.96.0.0/12"
@@ -198,7 +198,7 @@ initialize_cluster() {
     cat > /etc/resolv.conf << EOF
 nameserver 8.8.8.8
 nameserver 8.8.4.4
-nameserver 10.255.252.1
+nameserver 10.255.254.1
 search local
 EOF
 
@@ -260,7 +260,7 @@ install_calico_cni() {
     cat > /etc/resolv.conf << EOF
 nameserver 8.8.8.8
 nameserver 8.8.4.4
-nameserver 10.255.252.1
+nameserver 10.255.254.1
 search local
 EOF
 

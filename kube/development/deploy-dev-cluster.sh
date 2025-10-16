@@ -11,7 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Server configuration
 SERVER_NAME="k8s-dev1"
-SERVER_IP="10.255.252.10"
+SERVER_IP="10.255.254.10"
 CLUSTER_DOMAIN="k8s.local"
 
 # Deployment phases tracking

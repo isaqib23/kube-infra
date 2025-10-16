@@ -16,7 +16,7 @@ ALERTMANAGER_SLACK_WEBHOOK=""  # Set this for Slack notifications
 # Control plane servers
 # Single-node development cluster
 SERVER_NAME="k8s-dev1"
-SERVER_IP="10.255.252.10"
+SERVER_IP="10.255.254.10"
 
 # Colors for output
 RED='\033[0;31m'
