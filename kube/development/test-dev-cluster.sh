@@ -3,7 +3,7 @@
 # Test Script for DEVELOPMENT Single-Node Kubernetes Cluster
 # This script validates all components of the k8s-dev1 cluster
 
-set -euo pipefail
+set -eo pipefail
 
 # Colors for output
 RED='\033[0;31m'
@@ -64,7 +64,7 @@ test_cluster_connectivity() {
     fi
 
     log "Checking node status..."
-    NODE_STATUS=$(kubectl get nodes --no-headers | awk '{print $2}')
+    NODE_STATUS=$(kubectl get nodes --no-headers 2>/dev/null | awk '{print $2}' || echo "Unknown")
     if [[ "$NODE_STATUS" == "Ready" ]]; then
         success "Node is Ready"
     else
@@ -72,7 +72,7 @@ test_cluster_connectivity() {
     fi
 
     log "Node details:"
-    kubectl get nodes -o wide
+    kubectl get nodes -o wide 2>/dev/null || echo "Unable to get node details"
 }
 
 # Test 2: System pods
@@ -82,8 +82,8 @@ test_system_pods() {
     log "Checking kube-system pods..."
 
     # Get all pods in kube-system
-    TOTAL_PODS=$(kubectl get pods -n kube-system --no-headers | wc -l)
-    RUNNING_PODS=$(kubectl get pods -n kube-system --field-selector=status.phase=Running --no-headers | wc -l)
+    TOTAL_PODS=$(kubectl get pods -n kube-system --no-headers 2>/dev/null | wc -l || echo "0")
+    RUNNING_PODS=$(kubectl get pods -n kube-system --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l || echo "0")
 
     log "Total pods: $TOTAL_PODS, Running: $RUNNING_PODS"
 
@@ -99,7 +99,7 @@ test_system_pods() {
     )
 
     for component in "${CRITICAL_COMPONENTS[@]}"; do
-        if kubectl get pods -n kube-system | grep -q "$component.*Running"; then
+        if kubectl get pods -n kube-system 2>/dev/null | grep -q "$component.*Running"; then
             success "$component is running"
         else
             fail "$component is NOT running"
@@ -107,7 +107,7 @@ test_system_pods() {
     done
 
     log "All kube-system pods:"
-    kubectl get pods -n kube-system
+    kubectl get pods -n kube-system 2>/dev/null || echo "Unable to list pods"
 }
 
 # Test 3: Networking (Calico)
