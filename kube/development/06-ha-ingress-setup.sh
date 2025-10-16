@@ -218,11 +218,8 @@ spec:
   - "*.ingress.${CLUSTER_DOMAIN}"
   ipAddresses:
   - "127.0.0.1"
-  - "${VIP}"
+  - "$SERVER_IP"
 EOF
-
-    # Add server IP
-    echo "  - \"$SERVER_IP\"" >> /tmp/self-signed-certs.yaml
 
     cat >> /tmp/self-signed-certs.yaml << EOF
   duration: 8760h # 1 year
