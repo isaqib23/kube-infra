@@ -164,16 +164,16 @@ update_system() {
 
 configure_time_sync() {
     log "Configuring time synchronization..."
-    
-    # Your system uses ntpsec (already installed and enabled)
-    systemctl enable ntpsec
-    systemctl start ntpsec
-    
-    # Check if ntpsec is running
-    if systemctl is-active --quiet ntpsec; then
-        success "Time synchronization configured (ntpsec active)"
+
+    # Ubuntu 24.04 uses systemd-timesyncd by default
+    systemctl enable systemd-timesyncd
+    systemctl start systemd-timesyncd
+
+    # Check if timesyncd is running
+    if systemctl is-active --quiet systemd-timesyncd; then
+        success "Time synchronization configured (systemd-timesyncd active)"
     else
-        warning "ntpsec service may not be running properly, but continuing..."
+        warning "systemd-timesyncd service may not be running properly, but continuing..."
     fi
 }
 
