@@ -9,13 +9,13 @@ set -euo pipefail
 LOG_FILE="/var/log/ha-cluster-join.log"
 
 # Cluster configuration
-VIP="10.255.253.100"
+VIP="10.255.254.100"
 CLUSTER_NAME="staging-k8s-cluster"
 
 # Control plane servers (2 servers for staging)
 declare -A CONTROL_PLANES=(
-    ["k8s-stg1"]="10.255.253.10"
-    ["k8s-stg2"]="10.255.253.11"
+    ["k8s-stg1"]="10.255.254.20"
+    ["k8s-stg2"]="10.255.254.21"
 )
 
 # Colors for output
@@ -312,7 +312,7 @@ EOF
     cat > /etc/resolv.conf << EOF
 nameserver 8.8.8.8
 nameserver 8.8.4.4
-nameserver 10.255.253.1
+nameserver 10.255.254.1
 search local
 EOF
 

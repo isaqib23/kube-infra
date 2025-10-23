@@ -15,8 +15,8 @@ ALERTMANAGER_SLACK_WEBHOOK=""  # Set this for Slack notifications
 
 # Control plane servers (2 servers for staging)
 declare -A CONTROL_PLANES=(
-    ["k8s-stg1"]="10.255.253.10"
-    ["k8s-stg2"]="10.255.253.11"
+    ["k8s-stg1"]="10.255.254.20"
+    ["k8s-stg2"]="10.255.254.21"
 )
 
 # Colors for output
@@ -189,10 +189,10 @@ prometheus:
 # AlertManager configuration
 alertmanager:
   enabled: true
-  
+
   alertmanagerSpec:
-    # HA configuration
-    replicas: 3
+    # HA configuration (2 replicas for 2-node staging cluster)
+    replicas: 2
     
     # Resource allocation
     resources:
@@ -682,13 +682,13 @@ spec:
         description: "etcd cluster member {{ \$labels.instance }} has been unhealthy for more than 3 minutes."
     
     - alert: EtcdInsufficientMembers
-      expr: count(up{job="kube-etcd"} == 1) < 3
+      expr: count(up{job="kube-etcd"} == 1) < 2
       for: 3m
       labels:
         severity: critical
       annotations:
         summary: "etcd cluster has insufficient healthy members"
-        description: "etcd cluster has {{ \$value }} healthy members. At least 3 are required for quorum."
+        description: "etcd cluster has {{ \$value }} healthy members. At least 2 are required for staging quorum (both nodes must be operational)."
     
     # HAProxy/Load balancer alerts
     - alert: HAProxyDown

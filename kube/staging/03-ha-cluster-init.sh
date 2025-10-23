@@ -9,7 +9,7 @@ set -euo pipefail
 LOG_FILE="/var/log/ha-cluster-init.log"
 
 # Cluster configuration
-VIP="10.255.253.100"
+VIP="10.255.254.100"
 CLUSTER_NAME="staging-k8s-cluster"
 POD_NETWORK_CIDR="192.168.0.0/16"
 SERVICE_CIDR="10.96.0.0/12"
@@ -18,8 +18,8 @@ CALICO_VERSION="v3.30.1"
 
 # Control plane servers (2 servers for staging)
 declare -A CONTROL_PLANES=(
-    ["k8s-stg1"]="10.255.253.10"
-    ["k8s-stg2"]="10.255.253.11"
+    ["k8s-stg1"]="10.255.254.20"
+    ["k8s-stg2"]="10.255.254.21"
 )
 
 # Colors for output
@@ -255,7 +255,7 @@ initialize_cluster() {
     cat > /etc/resolv.conf << EOF
 nameserver 8.8.8.8
 nameserver 8.8.4.4
-nameserver 10.255.253.1
+nameserver 10.255.254.1
 search local
 EOF
 
@@ -317,7 +317,7 @@ install_calico_cni() {
     cat > /etc/resolv.conf << EOF
 nameserver 8.8.8.8
 nameserver 8.8.4.4
-nameserver 10.255.253.1
+nameserver 10.255.254.1
 search local
 EOF
 

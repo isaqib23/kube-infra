@@ -13,8 +13,8 @@ STORAGE_BASE_PATH="/mnt/k8s-storage"
 
 # Control plane servers (2 servers for staging)
 declare -A CONTROL_PLANES=(
-    ["k8s-stg1"]="10.255.253.10"
-    ["k8s-stg2"]="10.255.253.11"
+    ["k8s-stg1"]="10.255.254.20"
+    ["k8s-stg2"]="10.255.254.21"
 )
 
 # Colors for output

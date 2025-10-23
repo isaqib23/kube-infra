@@ -71,9 +71,9 @@ ff02::1         ip6-allnodes
 ff02::2         ip6-allrouters
 
 # Staging Kubernetes Cluster Nodes
-10.255.253.10    k8s-stg1
-10.255.253.11    k8s-stg2
-10.255.253.100   k8s-stg-api
+10.255.254.20    k8s-stg1
+10.255.254.21    k8s-stg2
+10.255.254.100   k8s-stg-api
 
 # Local server entry
 $SERVER_IP      $SERVER_NAME
@@ -226,7 +226,7 @@ configure_firewall() {
     ufw allow 8404/tcp
 
     # Allow all traffic from staging cluster subnet
-    ufw allow from 10.255.253.0/24
+    ufw allow from 10.255.254.0/24
     ufw allow from 192.168.0.0/16  # Pod network
     ufw allow from 10.96.0.0/12    # Service network
 

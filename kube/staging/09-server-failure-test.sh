@@ -11,7 +11,7 @@ LOG_FILE="/var/log/server-failure-test.log"
 # Test configuration
 TEST_NAMESPACE="failover-test"
 TEST_SERVER="k8s-stg2"  # This is the server we'll shutdown
-TEST_SERVER_IP="10.255.253.11"
+TEST_SERVER_IP="10.255.254.21"
 
 # Colors for output
 RED='\033[0;31m'
@@ -58,11 +58,17 @@ check_root() {
 }
 
 confirm_test() {
+    echo -e "${RED}⚠️  WARNING: 2-NODE STAGING CLUSTER LIMITATION${NC}"
+    echo -e "${RED}This cluster has ZERO fault tolerance. Shutting down one node will:${NC}"
+    echo -e "${RED}• Cause etcd to lose quorum (requires 2/2 nodes)${NC}"
+    echo -e "${RED}• Make the cluster READ-ONLY${NC}"
+    echo -e "${RED}• Prevent any new pods from starting${NC}"
+    echo
     echo -e "${YELLOW}This test will:${NC}"
     echo "1. Create test applications with persistent data"
     echo "2. Shutdown server $TEST_SERVER"
-    echo "3. Verify pods reschedule to remaining 3 nodes"
-    echo "4. Test data accessibility from rescheduled pods"
+    echo "3. Demonstrate that cluster becomes non-functional (expected behavior)"
+    echo "4. Show data inaccessibility when node is down"
     echo "5. Provide instructions to restore the server"
     echo
     read -p "Do you want to proceed with this test? [y/N]: " CONFIRM
@@ -427,36 +433,45 @@ What happened when the server failed:
    - Reason: Local PVs are tied to specific nodes (node affinity)
    - These pods wait for the node to return
 
-3. PODS ON HEALTHY NODES:
-   - Pods on k8s-stg1, k8s-stg1, k8s-stg2 continue running normally
+3. PODS ON HEALTHY NODE:
+   - Pods on k8s-stg1 continue running
    - Their data remains ACCESSIBLE
-   - No interruption to their operation
+   - However, cluster cannot schedule new pods (etcd quorum lost)
 
 4. DEPLOYMENTS WITH SHARED STORAGE:
    - If PVC is on a healthy node, deployment reschedules successfully
    - If PVC is on failed node, deployment cannot access data until node returns
 
-5. DATA CONTINUITY:
-   - 75% of cluster capacity remains available (3 out of 4 nodes)
-   - Data on healthy nodes (3/4) is accessible
-   - Data on failed node (1/4) is temporarily inaccessible
-   - Overall: ~75% data availability maintained
+5. DATA CONTINUITY (2-NODE STAGING LIMITATION):
+   - 50% of cluster capacity remains (1 out of 2 nodes)
+   - Data on healthy node (1/2) is accessible
+   - Data on failed node (1/2) is inaccessible
+   - ⚠️  Cluster is READ-ONLY (etcd quorum lost with 1/2 nodes)
+   - Overall: ~50% data availability, 0% write capability
 
-KEY TAKEAWAYS:
+KEY TAKEAWAYS FOR 2-NODE STAGING CLUSTER:
 
-✓ Cluster remains operational with 3/4 nodes
-✓ New pods can be scheduled on healthy nodes
-✓ Data on healthy nodes is fully accessible
-✗ Data on failed node is inaccessible until node returns
+✗ Cluster becomes READ-ONLY with one node failure (etcd quorum requires 2/2)
+✗ New pods CANNOT be scheduled (API server read-only mode)
+✗ Data on healthy node is readable but not writable
+✗ Data on failed node is completely inaccessible
 ✗ Pods with local PVs on failed node cannot reschedule
+⚠️  BOTH NODES MUST BE OPERATIONAL FOR FULL FUNCTIONALITY
 
-staging RECOMMENDATIONS:
+STAGING ENVIRONMENT RECOMMENDATIONS:
 
-1. Use distributed storage (Ceph, Longhorn) for critical data
+⚠️  For 2-node staging, node failure = complete cluster outage
+1. ✓ This is acceptable for staging/testing environments
+2. ✓ Ensure you can quickly restore failed nodes (console access)
+3. ✓ Keep regular etcd backups
+4. ✓ Document recovery procedures
+5. ✗ DO NOT use 2-node clusters for production
+
+For Production (requires at least 3 nodes for fault tolerance):
+1. Use 3 or more control plane nodes for etcd quorum
 2. Deploy applications with replicas across multiple nodes
-3. Use ReadWriteMany (RWX) storage for shared data
-4. Implement application-level data replication
-5. Monitor node health and alert on failures
+3. Use distributed storage (Ceph, Longhorn) for critical data
+4. Monitor node health and alert on failures immediately
 
 EOF
 }

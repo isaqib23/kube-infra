@@ -9,13 +9,13 @@ set -euo pipefail
 LOG_FILE="/var/log/ha-ingress-setup.log"
 
 # Ingress configuration
-VIP="10.255.253.100"
+VIP="10.255.254.100"
 CLUSTER_DOMAIN="k8s.local"
 
 # Control plane servers (2 servers for staging)
 declare -A CONTROL_PLANES=(
-    ["k8s-stg1"]="10.255.253.10"
-    ["k8s-stg2"]="10.255.253.11"
+    ["k8s-stg1"]="10.255.254.20"
+    ["k8s-stg2"]="10.255.254.21"
 )
 
 # Colors for output

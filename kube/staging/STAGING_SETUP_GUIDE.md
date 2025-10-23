@@ -12,8 +12,8 @@ This guide covers the deployment of a **2-node Staging Kubernetes cluster** on D
 | Component | Specification |
 |-----------|--------------|
 | **Servers** | 2x Dell PowerEdge R740 |
-| **Network** | 10.255.253.0/24 |
-| **VIP** | 10.255.253.100 |
+| **Network** | 10.255.254.0/24 |
+| **VIP** | 10.255.254.100 |
 | **Nodes** | k8s-stg1, k8s-stg2 |
 | **Architecture** | 2-node control-plane with etcd |
 | **HA Level** | Limited (2/2 quorum - zero fault tolerance) |
@@ -22,9 +22,9 @@ This guide covers the deployment of a **2-node Staging Kubernetes cluster** on D
 
 | Server | IP Address | Priority | Role |
 |--------|-----------|----------|------|
-| k8s-stg1 | 10.255.253.10 | 150 | Control Plane + Worker (Primary) |
-| k8s-stg2 | 10.255.253.11 | 140 | Control Plane + Worker |
-| k8s-stg-api | 10.255.253.100 | - | Virtual IP (Floating) |
+| k8s-stg1 | 10.255.254.20 | 150 | Control Plane + Worker (Primary) |
+| k8s-stg2 | 10.255.254.21 | 140 | Control Plane + Worker |
+| k8s-stg-api | 10.255.254.100 | - | Virtual IP (Floating) |
 
 ---
 
@@ -105,7 +105,7 @@ This script will:
 **Verification**:
 ```bash
 # Check VIP assignment (should be on k8s-stg1)
-ip addr show | grep 10.255.253.100
+ip addr show | grep 10.255.254.100
 
 # Check HAProxy status
 systemctl status haproxy
@@ -140,7 +140,7 @@ kubectl get nodes
 kubectl get pods --all-namespaces
 
 # Test API via VIP
-kubectl --server=https://10.255.253.100:6443 get nodes
+kubectl --server=https://10.255.254.100:6443 get nodes
 ```
 
 ### Phase 4: Join Second Control Plane
@@ -257,7 +257,7 @@ kubectl get pods -A
 **From remote machine**:
 ```bash
 # Copy kubeconfig from k8s-stg1
-scp root@10.255.253.10:/root/.kube/config ~/.kube/staging-config
+scp root@10.255.254.20:/root/.kube/config ~/.kube/staging-config
 
 # Use it
 export KUBECONFIG=~/.kube/staging-config
@@ -348,7 +348,7 @@ When ready to promote to production:
 systemctl status keepalived
 
 # Check VIP assignment
-ip addr show | grep 10.255.253.100
+ip addr show | grep 10.255.254.100
 
 # Restart if needed
 systemctl restart keepalived
@@ -392,16 +392,16 @@ For staging environment issues:
 
 ### Staging Server IPs
 ```
-k8s-stg1:     10.255.253.10
-k8s-stg2:     10.255.253.11
-VIP:          10.255.253.100
-Gateway:      10.255.253.1
+k8s-stg1:     10.255.254.20
+k8s-stg2:     10.255.254.21
+VIP:          10.255.254.100
+Gateway:      10.255.254.1
 ```
 
 ### Key Services
 ```
-Kubernetes API:   https://10.255.253.100:6443
-HAProxy Stats:    http://10.255.253.10:8404/stats
+Kubernetes API:   https://10.255.254.100:6443
+HAProxy Stats:    http://10.255.254.20:8404/stats
 Ingress HTTP:     NodePort 30080
 Ingress HTTPS:    NodePort 30443
 ```

@@ -9,15 +9,15 @@ set -euo pipefail
 LOG_FILE="/var/log/ha-loadbalancer-setup.log"
 
 # HA Configuration
-VIP="10.255.253.100"
+VIP="10.255.254.100"
 VIP_INTERFACE="eno1"  # Dell R740 standard interface
 VRRP_ROUTER_ID="52"
 VRRP_PASSWORD="k8s-stg24"
 
 # Server configuration (2 servers for staging)
 declare -A SERVER_CONFIG=(
-    ["k8s-stg1"]="10.255.253.10:150"  # IP:Priority
-    ["k8s-stg2"]="10.255.253.11:140"
+    ["k8s-stg1"]="10.255.254.20:150"  # IP:Priority
+    ["k8s-stg2"]="10.255.254.21:140"
 )
 
 # Colors for output

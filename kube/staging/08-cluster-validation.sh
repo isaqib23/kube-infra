@@ -9,14 +9,14 @@ set -euo pipefail
 LOG_FILE="/var/log/ha-cluster-validation.log"
 
 # Test configuration
-VIP="10.255.253.100"
+VIP="10.255.254.100"
 CLUSTER_DOMAIN="k8s.local"
 TEST_NAMESPACE="validation-tests"
 
 # Control plane servers (2 servers for staging)
 declare -A CONTROL_PLANES=(
-    ["k8s-stg1"]="10.255.253.10"
-    ["k8s-stg2"]="10.255.253.11"
+    ["k8s-stg1"]="10.255.254.20"
+    ["k8s-stg2"]="10.255.254.21"
 )
 
 # Test results tracking
@@ -98,8 +98,8 @@ check_prerequisites() {
     
     # Check if all nodes are ready
     local ready_nodes=$(kubectl get nodes --no-headers | grep -c "Ready" || echo "0")
-    if [[ $ready_nodes -lt 4 ]]; then
-        warning "Only $ready_nodes nodes are Ready. Expected 4 nodes."
+    if [[ $ready_nodes -lt 2 ]]; then
+        warning "Only $ready_nodes nodes are Ready. Expected 2 nodes."
     fi
     
     success "Prerequisites check passed"
@@ -119,10 +119,10 @@ test_cluster_basic_functionality() {
     
     # Test 1: Node readiness
     local ready_nodes=$(kubectl get nodes --no-headers | grep -c "Ready" || echo "0")
-    if [[ $ready_nodes -eq 4 ]]; then
+    if [[ $ready_nodes -eq 2 ]]; then
         test_pass "All nodes are Ready"
     else
-        test_fail "Node readiness check" "Only $ready_nodes/4 nodes are Ready"
+        test_fail "Node readiness check" "Only $ready_nodes/2 nodes are Ready"
     fi
     
     # Test 2: System pods
@@ -154,10 +154,10 @@ test_etcd_cluster() {
     
     # Test 1: etcd pod count
     local etcd_pods=$(kubectl get pods -n kube-system -l component=etcd --no-headers | grep -c "Running" || echo "0")
-    if [[ $etcd_pods -eq 4 ]]; then
+    if [[ $etcd_pods -eq 2 ]]; then
         test_pass "All etcd pods are running"
     else
-        test_fail "etcd pod count" "Only $etcd_pods/4 etcd pods running"
+        test_fail "etcd pod count" "Only $etcd_pods/2 etcd pods running"
     fi
     
     # Test 2: etcd cluster health
@@ -174,10 +174,10 @@ test_etcd_cluster() {
         fi
     done
     
-    if [[ $etcd_healthy -ge 3 ]]; then
-        test_pass "etcd cluster has healthy quorum ($etcd_healthy/4 members)"
+    if [[ $etcd_healthy -ge 2 ]]; then
+        test_pass "etcd cluster has healthy quorum ($etcd_healthy/2 members)"
     else
-        test_fail "etcd cluster health" "Only $etcd_healthy/4 etcd members are healthy"
+        test_fail "etcd cluster health" "Only $etcd_healthy/2 etcd members are healthy"
     fi
     
     # Test 3: etcd member list
@@ -205,10 +205,10 @@ test_haproxy_keepalived() {
         fi
     done
     
-    if [[ $haproxy_running -eq 4 ]]; then
+    if [[ $haproxy_running -eq 2 ]]; then
         test_pass "HAProxy running on all nodes"
     else
-        test_fail "HAProxy service status" "HAProxy running on only $haproxy_running/4 nodes"
+        test_fail "HAProxy service status" "HAProxy running on only $haproxy_running/2 nodes"
     fi
     
     # Test 2: Keepalived service status
@@ -220,10 +220,10 @@ test_haproxy_keepalived() {
         fi
     done
     
-    if [[ $keepalived_running -eq 4 ]]; then
+    if [[ $keepalived_running -eq 2 ]]; then
         test_pass "Keepalived running on all nodes"
     else
-        test_fail "Keepalived service status" "Keepalived running on only $keepalived_running/4 nodes"
+        test_fail "Keepalived service status" "Keepalived running on only $keepalived_running/2 nodes"
     fi
     
     # Test 3: VIP assignment
@@ -309,7 +309,7 @@ test_ingress_functionality() {
     
     # Test 1: NGINX Ingress Controller pods
     local ingress_pods=$(kubectl get pods -n ingress-nginx -l app.kubernetes.io/name=ingress-nginx --no-headers | grep -c "Running" || echo "0")
-    if [[ $ingress_pods -ge 4 ]]; then
+    if [[ $ingress_pods -ge 2 ]]; then
         test_pass "NGINX Ingress Controller pods running"
     else
         test_fail "NGINX Ingress pods" "Only $ingress_pods ingress pods running"
@@ -419,7 +419,7 @@ test_monitoring_stack() {
     
     # Test 3: AlertManager pods
     local alertmanager_pods=$(kubectl get pods -n monitoring -l app.kubernetes.io/name=alertmanager --no-headers | grep -c "Running" || echo "0")
-    if [[ $alertmanager_pods -ge 3 ]]; then
+    if [[ $alertmanager_pods -ge 2 ]]; then
         test_pass "AlertManager pods running"
     else
         test_fail "AlertManager pods" "Only $alertmanager_pods alertmanager pods running"
@@ -502,10 +502,10 @@ EOF
         fi
     done
     
-    if [[ $nodes_with_pods -ge 3 ]]; then
-        test_pass "Workload distribution across nodes ($nodes_with_pods/4 nodes have pods)"
+    if [[ $nodes_with_pods -ge 2 ]]; then
+        test_pass "Workload distribution across nodes ($nodes_with_pods/2 nodes have pods)"
     else
-        test_fail "Workload distribution" "Pods only distributed to $nodes_with_pods/4 nodes"
+        test_fail "Workload distribution" "Pods only distributed to $nodes_with_pods/2 nodes"
     fi
 }
 
@@ -560,14 +560,15 @@ EOF
 simulate_node_failure() {
     log "=== Simulating Node Failure (Non-destructive) ==="
     
-    warning "This test simulates node failure by stopping kubelet service temporarily"
+    warning "⚠️  STAGING CLUSTER LIMITATION: This 2-node cluster has ZERO fault tolerance"
+    warning "Stopping a node will cause the cluster to lose etcd quorum and become read-only"
     read -p "Do you want to proceed with failover testing? [y/N]: " CONFIRM_FAILOVER
-    
+
     if [[ ! $CONFIRM_FAILOVER =~ ^[Yy]$ ]]; then
-        warning "Skipping failover testing"
+        warning "Skipping failover testing (recommended for 2-node staging cluster)"
         return 0
     fi
-    
+
     # Choose a non-primary node for testing
     local test_node="k8s-stg2"
     local test_node_ip="${CONTROL_PLANES[$test_node]}"
@@ -655,10 +656,10 @@ test_backup_functionality() {
         fi
     done
     
-    if [[ $backup_dirs_exist -eq 4 ]]; then
+    if [[ $backup_dirs_exist -eq 2 ]]; then
         test_pass "Backup directories exist on all nodes"
     else
-        test_fail "Backup directories" "Backup directories exist on only $backup_dirs_exist/4 nodes"
+        test_fail "Backup directories" "Backup directories exist on only $backup_dirs_exist/2 nodes"
     fi
 }
 
@@ -683,7 +684,7 @@ generate_validation_report() {
 STAGING Kubernetes Cluster Validation Report
 =======================================
 Date: $(date)
-Cluster: STAGING Kubernetes on 4x Dell R740 servers
+Cluster: STAGING Kubernetes on 2x Dell R740 servers
 Total Tests: $TOTAL_TESTS
 Passed: $PASSED_TESTS
 Failed: $FAILED_TESTS
