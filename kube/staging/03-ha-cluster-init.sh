@@ -13,7 +13,7 @@ VIP="10.255.254.100"
 CLUSTER_NAME="staging-k8s-cluster"
 POD_NETWORK_CIDR="192.168.0.0/16"
 SERVICE_CIDR="10.96.0.0/12"
-KUBE_VERSION="1.34"
+KUBE_VERSION="1.34.0"
 CALICO_VERSION="v3.30.1"
 
 # Control plane servers (2 servers for staging)
