@@ -83,17 +83,28 @@ check_prerequisites() {
 
 verify_all_nodes_storage() {
     log "Verifying storage directories on all nodes..."
-    
+
+    local current_hostname=$(hostname)
+
     for node in "${!CONTROL_PLANES[@]}"; do
         local node_ip="${CONTROL_PLANES[$node]}"
-        
+
         log "Checking storage directories on $node ($node_ip)..."
-        
-        # Check if we can SSH to the node (assuming SSH keys are set up)
-        if ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no root@$node_ip "test -d $STORAGE_BASE_PATH" 2>/dev/null; then
-            success "Storage directories verified on $node"
+
+        # Check local node directly without SSH
+        if [[ "$node" == "$current_hostname" ]]; then
+            if [[ -d "$STORAGE_BASE_PATH" ]]; then
+                success "Storage directories verified on $node (local)"
+            else
+                warning "Storage directory $STORAGE_BASE_PATH does not exist on local node"
+            fi
         else
-            warning "Cannot verify storage on $node via SSH. Directories should exist from previous scripts"
+            # Check remote nodes via SSH
+            if ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no root@$node_ip "test -d $STORAGE_BASE_PATH" 2>/dev/null; then
+                success "Storage directories verified on $node"
+            else
+                warning "Cannot verify storage on $node via SSH. Directories should exist from previous scripts"
+            fi
         fi
     done
 }
