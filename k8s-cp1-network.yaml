@@ -7,12 +7,12 @@ network:
       dhcp4: false
       dhcp6: false
       addresses:
-        - 10.255.252.10/24
+        - 10.255.254.21/24
       routes:
         - to: default
-          via: 10.255.252.1
+          via: 10.255.254.1
       nameservers:
         addresses:
           - 8.8.8.8
           - 8.8.4.4
-          - 10.255.252.1
+          - 10.255.254.1

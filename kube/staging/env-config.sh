@@ -4,7 +4,7 @@
 # 2-Server Kubernetes Cluster Setup
 
 export ENVIRONMENT="staging"
-export KUBE_VERSION="1.34.0"
+export KUBE_VERSION="1.34"
 export CONTAINERD_VERSION="1.7.28"
 export CALICO_VERSION="v3.30.1"
 

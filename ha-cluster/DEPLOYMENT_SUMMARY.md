@@ -339,7 +339,7 @@ You now have a **complete, production-ready HA Kubernetes cluster** implementati
 **🔗 Quick Links**:
 - [Deployment Plan](../HA_DEPLOYMENT_PLAN.md)
 - [Script Documentation](README.md)
-- [Dell R740 Specifications](../r740_server.md)
+- [Dell R740 Specifications](../kube/r740_server.md)
 - [Version Information](../VERSIONS.md)
 
 **Total Implementation**: 9 comprehensive scripts + documentation
