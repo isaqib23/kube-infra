@@ -13,7 +13,7 @@ VIP="10.255.254.100"
 CLUSTER_NAME="staging-k8s-cluster"
 POD_NETWORK_CIDR="192.168.0.0/16"
 SERVICE_CIDR="10.96.0.0/12"
-KUBE_VERSION="1.34.0"
+KUBE_VERSION="1.34"
 CALICO_VERSION="v3.30.1"
 
 # Control plane servers (2 servers for staging)
@@ -768,41 +768,54 @@ EOF
 
 create_backup_script() {
     log "Creating etcd backup script..."
-    
-    cat > /opt/kubernetes/etcd-backup.sh << EOF
+
+    # Install etcdctl if not already present
+    if ! command -v etcdctl &> /dev/null; then
+        log "Installing etcd-client..."
+        ETCD_VERSION="v3.5.17"
+        curl -L https://github.com/etcd-io/etcd/releases/download/${ETCD_VERSION}/etcd-${ETCD_VERSION}-linux-amd64.tar.gz -o /tmp/etcd.tar.gz
+        tar xzvf /tmp/etcd.tar.gz -C /tmp
+        mv /tmp/etcd-${ETCD_VERSION}-linux-amd64/etcdctl /usr/local/bin/
+        rm -rf /tmp/etcd*
+        success "etcdctl installed"
+    else
+        log "etcdctl already installed"
+    fi
+
+    cat > /opt/kubernetes/etcd-backup.sh << 'EOF'
 #!/bin/bash
 # etcd Backup Script for STAGING Kubernetes Cluster
 # Run this script daily to backup etcd data
 
 BACKUP_DIR="/opt/kubernetes/backups"
-DATE=\$(date +%Y%m%d_%H%M%S)
-BACKUP_FILE="\$BACKUP_DIR/etcd-snapshot-\$DATE.db"
+DATE=$(date +%Y%m%d_%H%M%S)
+BACKUP_FILE="$BACKUP_DIR/etcd-snapshot-$DATE.db"
 
 # Create backup directory
-mkdir -p \$BACKUP_DIR
+mkdir -p $BACKUP_DIR
 
 # Take etcd snapshot
-ETCDCTL_API=3 etcdctl snapshot save \$BACKUP_FILE \\
-    --endpoints=https://127.0.0.1:2379 \\
-    --cacert=/etc/kubernetes/pki/etcd/ca.crt \\
-    --cert=/etc/kubernetes/pki/etcd/server.crt \\
+ETCDCTL_API=3 etcdctl snapshot save $BACKUP_FILE \
+    --endpoints=https://127.0.0.1:2379 \
+    --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+    --cert=/etc/kubernetes/pki/etcd/server.crt \
     --key=/etc/kubernetes/pki/etcd/server.key
 
 # Verify backup
-ETCDCTL_API=3 etcdctl snapshot status \$BACKUP_FILE \\
+ETCDCTL_API=3 etcdctl snapshot status $BACKUP_FILE \
     --write-out=table
 
 # Keep only last 7 days of backups
-find \$BACKUP_DIR -name "etcd-snapshot-*.db" -mtime +7 -delete
+find $BACKUP_DIR -name "etcd-snapshot-*.db" -mtime +7 -delete
 
-echo "etcd backup completed: \$BACKUP_FILE"
+echo "etcd backup completed: $BACKUP_FILE"
 EOF
-    
+
     chmod +x /opt/kubernetes/etcd-backup.sh
-    
-    # Create cron job for daily backups
-    (crontab -l 2>/dev/null; echo "0 2 * * * /opt/kubernetes/etcd-backup.sh >> /var/log/etcd-backup.log 2>&1") | crontab -
-    
+
+    # Create cron job for daily backups (remove existing first to avoid duplicates)
+    (crontab -l 2>/dev/null | grep -v '/opt/kubernetes/etcd-backup.sh'; echo "0 2 * * * /opt/kubernetes/etcd-backup.sh >> /var/log/etcd-backup.log 2>&1") | crontab - || true
+
     success "etcd backup script created and scheduled"
 }
 
